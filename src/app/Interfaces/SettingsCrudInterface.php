@@ -1,7 +1,7 @@
 <?php
-namespace Backpack\Pages\app\Interfaces;
+namespace Backpack\Settings\app\Interfaces;
 
-interface PageCrudInterface
+interface SettingsCrudInterface
 {
   public static function setupCreateOperation($crud);
   public static function setupUpdateOperation($crud);

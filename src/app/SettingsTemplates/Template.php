@@ -1,16 +1,16 @@
 <?php
 
-namespace App\PageTemplates;
+namespace App\SettingsTemplates;
 
-use App\PageTemplates\Traits\HomeTrait;
+use App\SettingsTemplates\Traits\DeliveryTrait;
 
 class Template {
 
-  use HomeTrait;
+  use DeliveryTrait;
 
   public static $templates = [
-    'common' => 'Общий',
-    'home' => 'Главная страница'
+    'text' => 'Текст',
+    'delivery' => 'Доставка'
   ];
 
   public static function useTemplate($name, $crud) {

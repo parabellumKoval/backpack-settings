@@ -3,7 +3,7 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
-use Backpack\Pages\app\Http\Controllers\Api\PageController;
+use Backpack\Settings\app\Http\Controllers\Api\SettingsController;
 
 /*
 |--------------------------------------------------------------------------
@@ -16,6 +16,6 @@ use Backpack\Pages\app\Http\Controllers\Api\PageController;
 |
 */
 
-Route::prefix('api/pages')->controller(PageController::class)->group(function () {
-  Route::get('{slug_or_template}', 'show')->middleware('api');
+Route::prefix('api/settings')->controller(SettingsController::class)->group(function () {
+  Route::get('{template}', 'show')->middleware('api');
 });

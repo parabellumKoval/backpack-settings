@@ -1,19 +1,19 @@
-# Backpack-articles
+# Backpack-settings
 
-[![Build Status](https://travis-ci.org/parabellumKoval/backpack-pages.svg?branch=master)](https://travis-ci.org/parabellumKoval/backpack-pages)
-[![Coverage Status](https://coveralls.io/repos/github/parabellumKoval/backpack-pages/badge.svg?branch=master)](https://coveralls.io/github/parabellumKoval/backpack-pages?branch=master)
+[![Build Status](https://travis-ci.org/parabellumKoval/backpack-settings.svg?branch=master)](https://travis-ci.org/parabellumKoval/backpack-settings)
+[![Coverage Status](https://coveralls.io/repos/github/parabellumKoval/backpack-settings/badge.svg?branch=master)](https://coveralls.io/github/parabellumKoval/backpack-settings?branch=master)
 
-[![Packagist](https://img.shields.io/packagist/v/parabellumKoval/backpack-pages.svg)](https://packagist.org/packages/parabellumKoval/backpack-pages)
-[![Packagist](https://poser.pugx.org/parabellumKoval/backpack-pages/d/total.svg)](https://packagist.org/packages/parabellumKoval/backpack-pages)
-[![Packagist](https://img.shields.io/packagist/l/parabellumKoval/backpack-pages.svg)](https://packagist.org/packages/parabellumKoval/backpack-pages)
+[![Packagist](https://img.shields.io/packagist/v/parabellumKoval/backpack-settings.svg)](https://packagist.org/packages/parabellumKoval/backpack-settings)
+[![Packagist](https://poser.pugx.org/parabellumKoval/backpack-settings/d/total.svg)](https://packagist.org/packages/parabellumKoval/backpack-settings)
+[![Packagist](https://img.shields.io/packagist/l/parabellumKoval/backpack-settings.svg)](https://packagist.org/packages/parabellumKoval/backpack-settings)
 
-This package provides a quick starter kit for implementing pages for Laravel Backpack. Provides a database, CRUD interface, API routes and more.
+This package provides a quick starter kit for implementing settings for Laravel Backpack. Provides a database, CRUD interface, API routes and more.
 
 ## Installation
 
 Install via composer
 ```bash
-composer require parabellumKoval/backpack-pages
+composer require parabellumKoval/backpack-settings
 ```
 
 Migrate
@@ -25,44 +25,44 @@ php artisan migrate
 
 #### Configuration File
 ```bash
-php artisan vendor:publish --provider="Backpack\Pages\ServiceProvider" --tag="config"
+php artisan vendor:publish --provider="Backpack\Settings\ServiceProvider" --tag="config"
 ```
 
 #### Translation Files
 ```bash
-php artisan vendor:publish --provider="Backpack\Pages\ServiceProvider" --tag="trans"
+php artisan vendor:publish --provider="Backpack\Settings\ServiceProvider" --tag="trans"
 ```
 
 #### Views File
 ```bash
-php artisan vendor:publish --provider="Backpack\Pages\ServiceProvider" --tag="views"
+php artisan vendor:publish --provider="Backpack\Settings\ServiceProvider" --tag="views"
 ```
 
 #### Migrations File
 ```bash
-php artisan vendor:publish --provider="Backpack\Pages\ServiceProvider" --tag="migrations"
+php artisan vendor:publish --provider="Backpack\Settings\ServiceProvider" --tag="migrations"
 ```
 
 #### Routes File
 ```bash
-php artisan vendor:publish --provider="Backpack\Pages\ServiceProvider" --tag="routes"
+php artisan vendor:publish --provider="Backpack\Settings\ServiceProvider" --tag="routes"
 ```
 
 #### Page templates Files
 ```bash
-php artisan vendor:publish --provider="Backpack\Pages\ServiceProvider" --tag="temps"
+php artisan vendor:publish --provider="Backpack\Settings\ServiceProvider" --tag="temps"
 ```
 
 #### Stub File
 ```bash
-php artisan vendor:publish --provider="Backpack\Pages\ServiceProvider" --tag="stub"
+php artisan vendor:publish --provider="Backpack\Settings\ServiceProvider" --tag="stub"
 ```
 
 ## Usage
 
 ### Seeders
 ```bash
-php artisan db:seed --class="Backpack\Pages\database\seeders\PagesSeeder"
+php artisan db:seed --class="Backpack\Settings\database\seeders\SettingsSeeder"
 ```
 
 ## Security
@@ -72,5 +72,5 @@ instead of using the issue tracker.
 
 ## Credits
 
-- [parabellumKoval](https://github.com/parabellumKoval/backpack-pages)
-- [All contributors](https://github.com/parabellumKoval/backpack-pages/graphs/contributors)
+- [parabellumKoval](https://github.com/parabellumKoval/backpack-settings)
+- [All contributors](https://github.com/parabellumKoval/backpack-settings/graphs/contributors)

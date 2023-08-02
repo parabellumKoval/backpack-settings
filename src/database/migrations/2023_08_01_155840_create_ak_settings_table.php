@@ -4,7 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-class CreateAkPagesTable extends Migration
+class CreateAkSettingsTable extends Migration
 {
     /**
      * Run the migrations.
@@ -13,14 +13,13 @@ class CreateAkPagesTable extends Migration
      */
     public function up()
     {
-        Schema::create('ak_pages', function (Blueprint $table) {
+        Schema::create('ak_settings', function (Blueprint $table) {
             $table->increments('id');
             $table->string('template');
-            $table->json('title');
-            $table->string('slug');
-            $table->boolean('is_active')->default(1);
+            $table->string('key');
+            $table->json('name')->nullable();
             $table->json('extras')->nullable();
-            $table->json('seo')->nullable();
+
             $table->timestamps();
         });
     }
@@ -32,6 +31,6 @@ class CreateAkPagesTable extends Migration
      */
     public function down()
     {
-      Schema::dropIfExists('ak_pages');
+      Schema::dropIfExists('ak_settings');
     }
 }

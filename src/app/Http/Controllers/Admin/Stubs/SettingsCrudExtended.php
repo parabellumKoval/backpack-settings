@@ -2,9 +2,9 @@
 
 namespace App\Http\Controllers\Admin\Crud;
 
-use Backpack\Pages\app\Interfaces\PageCrudInterface;
+use Backpack\Settings\app\Interfaces\SettingsCrudInterface;
 
-class PageCrudExtended implements PageCrudInterface {
+class SettingsCrudExtended implements SettingsCrudInterface {
   
   // Extends of SetupCreateOperation
   public static function setupCreateOperation($crud) {}

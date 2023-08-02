@@ -1,13 +1,13 @@
 <?php
 
-namespace Backpack\Pages\Facades;
+namespace Backpack\Settings\Facades;
 
 use Illuminate\Support\Facades\Facade;
 
-class Page extends Facade
+class Settings extends Facade
 {
     protected static function getFacadeAccessor()
     {
-        return 'page';
+        return 'settings';
     }
 }

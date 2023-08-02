@@ -1,19 +1,11 @@
 <?php
 
-namespace App\PageTemplates\Traits;
+namespace App\SettingsTemplates\Traits;
 
-trait HomeTrait
+trait DeliveryTrait
 {
-  private static function home($crud)
+  private static function delivery($crud)
   {
-
-    // Seo
-    $crud->addField([
-      'name' => 'content_separator_4',
-      'type' => 'custom_html',
-      'value' => '<br><h4>Seo</h4><hr>',
-      'tab' => 'Основное',
-    ]);
       
     $crud->addField([
         'name' => 'seo_title',

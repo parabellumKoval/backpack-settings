@@ -1,13 +1,13 @@
 {
-  "name": "parabellumkoval/backpack-pages",
-  "description": "Implement Api Pages API & MYSQL for backpack",
+  "name": "parabellumkoval/backpack-settings",
+  "description": "Implement Settings API & MYSQL for backpack",
   "keywords": [
     "parabellumKoval",
     "backpack",
     "laravel",
-    "pages"
+    "settings"
   ],
-  "homepage": "https://github.com/parabellumkoval/backpack-pages",
+  "homepage": "https://github.com/parabellumkoval/backpack-settings",
   "license": "MIT",
   "type": "library",
   "authors": [
@@ -34,13 +34,12 @@
   },
   "autoload": {
     "psr-4": {
-        "Backpack\\Pages\\": "src",
-        "Backpack\\Pages\\Database\\Factories\\": "database/factories"
+        "Backpack\\Settings\\": "src"
     }
   },
   "autoload-dev": {
     "psr-4": {
-        "Backpack\\Pages\\Tests\\": "tests"
+        "Backpack\\Settings\\Tests\\": "tests"
     }
   },
   "scripts": {
@@ -62,10 +61,10 @@
   "extra": {
       "laravel": {
           "providers": [
-            "Backpack\\Pages\\ServiceProvider"
+            "Backpack\\Settings\\ServiceProvider"
           ],
           "aliases": {
-            "Product": "Backpack\\Pages\\Facades\\Page"
+            "Product": "Backpack\\Settings\\Facades\\Settings"
           }
       }
   },

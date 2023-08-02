@@ -1,10 +1,10 @@
 <?php
 
-namespace Backpack\Pages\app\Http\Resources;
+namespace Backpack\Settings\app\Http\Resources;
 
 use Illuminate\Http\Resources\Json\JsonResource;
 
-class PageLargeResource extends JsonResource
+class SettingsResource extends JsonResource
 {
     /**
      * Transform the resource into an array.
@@ -16,12 +16,10 @@ class PageLargeResource extends JsonResource
     {
       return [
 		    'id' => $this->id,
-		    'title' => $this->title,
-		    'slug' => $this->slug,
+		    'key' => $this->key,
 		    'template' => $this->template,
 		    'is_active' => $this->is_active,
 		    'extras' => $this->extrasDecoded,
-        'seo' => $this->seoDecoded
       ];
     }
 }

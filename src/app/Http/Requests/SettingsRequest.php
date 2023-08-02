@@ -1,11 +1,11 @@
 <?php
 
-namespace Backpack\Pages\app\Http\Requests;
+namespace Backpack\Settings\app\Http\Requests;
 
 use App\Http\Requests\Request;
 use Illuminate\Foundation\Http\FormRequest;
 
-class PageRequest extends FormRequest
+class SettingsRequest extends FormRequest
 {
     /**
      * Determine if the user is authorized to make this request.
