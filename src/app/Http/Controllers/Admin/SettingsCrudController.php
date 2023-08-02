@@ -37,19 +37,12 @@ class SettingsCrudController extends CrudController
     {   
       $this->crud->addColumn([
           'name' => 'key',
-          'label' => trans('parabellumkoval::settings.key'),
+          'label' => trans('ak_settings::settings.key'),
       ]);
 
       $this->crud->addColumn([
           'name' => 'name',
-          'label' => trans('parabellumkoval::settings.name'),
-      ]);
-      
-      $this->crud->addColumn([
-          'name' => 'template',
-          'label' => trans('parabellumkoval::settings.template'),
-          'type' => 'model_function',
-          'function_name' => 'getTemplateName',
+          'label' => trans('ak_settings::settings.setting'),
       ]);
 
       if($this->isSettingsCrudClass()){
@@ -90,7 +83,7 @@ class SettingsCrudController extends CrudController
 
       $this->crud->addField([
         'name' => 'template',
-        'label' => trans('parabellumkoval::settings.template'),
+        'label' => trans('ak_settings::settings.template'),
         'type' => 'text',
         'attributes' => [
           'readonly' => true
@@ -99,7 +92,7 @@ class SettingsCrudController extends CrudController
 
       $this->crud->addField([
         'name' => 'key',
-        'label' => trans('parabellumkoval::settings.key'),
+        'label' => trans('ak_settings::settings.key'),
         'type' => 'text',
         'attributes' => [
           'readonly' => true
@@ -108,7 +101,7 @@ class SettingsCrudController extends CrudController
       
       $this->crud->addField([
         'name' => 'name',
-        'label' => trans('parabellumkoval::settings.name'),
+        'label' => trans('ak_settings::settings.setting'),
         'type' => 'text',
       ]);
     }

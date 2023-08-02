@@ -26,7 +26,7 @@ class Settings extends Model
     protected $primaryKey = 'id';
     public $timestamps = true;
     // protected $guarded = ['id'];
-    protected $fillable = ['template', 'key', 'content', 'extras'];
+    protected $fillable = ['template', 'key', 'name', 'extras'];
     // protected $hidden = [];
     // protected $dates = [];
     protected $fakeColumns = ['extras'];
@@ -34,7 +34,7 @@ class Settings extends Model
         // 'extras' => 'array',
     ];
 
-    protected $translatable = ['extras'];
+    protected $translatable = ['extras', 'name'];
 
     /*
     |--------------------------------------------------------------------------

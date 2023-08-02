@@ -21,12 +21,11 @@ class Template {
   {
       $crud->addField([
         'name' => 'content',
-        'label' => trans('pages.content'),
+        'label' => trans('ak_settings::settings.content'),
         'type' => 'ckeditor',
-        'placeholder' => trans('pages.content_placeholder'),
+        'placeholder' => trans('ak_settings::settings.content_placeholder'),
         'fake' => true,
         'store_in' => 'extras',
-        'tab' => 'Основное',
       ]);
   }
 }

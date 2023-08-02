@@ -67,7 +67,7 @@ php artisan vendor:publish --provider="Backpack\Settings\ServiceProvider" --tag=
 
 ### Package Seeders
 ```bash
-php artisan db:seed --class="Backpack\Settings\database\seeders\SettingsSeeder"
+php artisan db:seed --class="SettingsSeeder"
 ```
 
 

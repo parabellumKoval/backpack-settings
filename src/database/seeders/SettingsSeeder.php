@@ -1,6 +1,6 @@
 <?php
 
-namespace Backpack\Settings\database\seeders;
+namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
 use Illuminate\Database\Eloquent\Factories\Sequence;
@@ -40,11 +40,6 @@ class SettingsSeeder extends Seeder
       Settings::create([
         'key' => 'noty',
         'template' => 'noty'
-      ]);
-
-      Settings::create([
-        'key' => 'home_page',
-        'template' => 'home_page'
       ]);
 
       Settings::create([
