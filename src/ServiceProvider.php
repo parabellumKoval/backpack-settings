@@ -53,6 +53,11 @@ class ServiceProvider extends \Illuminate\Support\ServiceProvider
         __DIR__.'/app/SettingsTemplates' => base_path('app/SettingsTemplates'),
       ], 'temps');
 
+      // Seeders
+      $this->publishes([
+        __DIR__.'/database/seeders' => base_path('database/seeders'),
+      ], 'seeders');
+
     }
 
     public function register()

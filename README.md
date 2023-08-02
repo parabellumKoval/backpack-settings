@@ -58,12 +58,18 @@ php artisan vendor:publish --provider="Backpack\Settings\ServiceProvider" --tag=
 php artisan vendor:publish --provider="Backpack\Settings\ServiceProvider" --tag="stub"
 ```
 
+#### Seeder Files
+```bash
+php artisan vendor:publish --provider="Backpack\Settings\ServiceProvider" --tag="seeders"
+```
+
 ## Usage
 
-### Seeders
+### Package Seeders
 ```bash
 php artisan db:seed --class="Backpack\Settings\database\seeders\SettingsSeeder"
 ```
+
 
 ## Security
 
