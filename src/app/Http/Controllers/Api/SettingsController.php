@@ -38,4 +38,23 @@ class SettingsController extends \App\Http\Controllers\Controller
     return $this->resource::collection($settings);
   }
 
+  public function all_plucked(Request $request) {
+    try{
+      $settings = Settings::all();
+
+      $plucked = [];
+
+      for($i=0; $i < $settings->count(); $i++) {
+        if(!empty($settings[$i]['extras']))
+          $plucked[$settings[$i]['key']] = json_decode($settings[$i]['extras'], true);
+        else
+          $plucked[$settings[$i]['key']] = null;
+      }
+      
+    }catch(ModelNotFoundException $e) {
+      return response()->json($e->getMessage(), 404);
+    }
+
+    return $plucked;
+  }
 }

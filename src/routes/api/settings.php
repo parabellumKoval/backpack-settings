@@ -17,6 +17,7 @@ use Backpack\Settings\app\Http\Controllers\Api\SettingsController;
 */
 
 Route::prefix('api/settings')->controller(SettingsController::class)->group(function () {
-  Route::get('{template}', 'show')->middleware('api');
   Route::get('', 'all')->middleware('api');
+  Route::get('/plucked', 'all_plucked')->middleware('api');
+  Route::get('{template}', 'show')->middleware('api');
 });
