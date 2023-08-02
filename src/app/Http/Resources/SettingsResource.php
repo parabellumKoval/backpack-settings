@@ -18,7 +18,7 @@ class SettingsResource extends JsonResource
 		    'id' => $this->id,
 		    'key' => $this->key,
 		    'template' => $this->template,
-		    'is_active' => $this->is_active,
+		    'name' => $this->name,
 		    'extras' => $this->extrasDecoded,
       ];
     }

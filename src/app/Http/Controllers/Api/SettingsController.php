@@ -18,15 +18,24 @@ class SettingsController extends \App\Http\Controllers\Controller
 
   public function show(Request $request, $template) {
     try{
-      $article = Settings::active()
-                    ->where('template', $slug_or_template)
+      $setting = Settings::where('template', $template)
                     ->firstOrFail();
 
     }catch(ModelNotFoundException $e) {
       return response()->json($e->getMessage(), 404);
     }
 
-    return new $this->resource($article);
+    return new $this->resource($setting);
+  }
+
+  public function all(Request $request) {
+    try{
+      $settings = Settings::all();
+    }catch(ModelNotFoundException $e) {
+      return response()->json($e->getMessage(), 404);
+    }
+
+    return $this->resource::collection($settings);
   }
 
 }
