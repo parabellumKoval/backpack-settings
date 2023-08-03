@@ -30,9 +30,9 @@ class Settings extends Model
     // protected $hidden = [];
     // protected $dates = [];
     protected $fakeColumns = ['extras'];
-    protected $casts = [
-        // 'extras' => 'array',
-    ];
+    // protected $casts = [
+    //     'extras' => 'array',
+    // ];
 
     protected $translatable = ['extras', 'name'];
 
@@ -76,6 +76,20 @@ class Settings extends Model
       
       $data = json_decode($this->extras, true);
       return $data;      
+    }
+
+    public function getExtrasNormalizedAttribute() {
+      if(empty($this->extrasDecoded))
+        return null;
+      
+      
+      return array_map(function($item) {
+        try {
+          return json_decode($item, true);
+        }catch(\Exception $e) {
+          return $item;
+        }
+      }, $this->extrasDecoded);
     }
 
     /*

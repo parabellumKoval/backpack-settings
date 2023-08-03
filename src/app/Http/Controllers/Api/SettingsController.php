@@ -46,7 +46,7 @@ class SettingsController extends \App\Http\Controllers\Controller
 
       for($i=0; $i < $settings->count(); $i++) {
         if(!empty($settings[$i]['extras']))
-          $plucked[$settings[$i]['key']] = json_decode($settings[$i]['extras'], true);
+          $plucked[$settings[$i]['key']] = $settings[$i]['extrasNormalized'];
         else
           $plucked[$settings[$i]['key']] = null;
       }
