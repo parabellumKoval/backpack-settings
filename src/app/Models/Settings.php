@@ -47,6 +47,11 @@ class Settings extends Model
         return str_replace('_', ' ', Str::title($this->template));
     }
 
+    private function isJson($string) {
+      json_decode($string);
+      return json_last_error() === JSON_ERROR_NONE;
+    }
+
     /*
     |--------------------------------------------------------------------------
     | RELATIONS
@@ -84,9 +89,9 @@ class Settings extends Model
       
       
       return array_map(function($item) {
-        try {
+        if($this->isJson($item)) {
           return json_decode($item, true);
-        }catch(\Exception $e) {
+        }else {
           return $item;
         }
       }, $this->extrasDecoded);
