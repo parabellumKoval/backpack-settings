@@ -89,7 +89,7 @@ class Settings extends Model
       
       
       return array_map(function($item) {
-        if($this->isJson($item)) {
+        if(!is_array($item) && $this->isJson($item)) {
           return json_decode($item, true);
         }else {
           return $item;
