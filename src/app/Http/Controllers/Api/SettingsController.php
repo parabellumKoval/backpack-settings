@@ -45,8 +45,8 @@ class SettingsController extends \App\Http\Controllers\Controller
       $plucked = [];
 
       for($i=0; $i < $settings->count(); $i++) {
-        if(!empty($settings[$i]['extras']))
-          $plucked[$settings[$i]['key']] = $settings[$i]['extrasNormalized'];
+        if(!empty($settings[$i]['extras_trans']))
+          $plucked[$settings[$i]['key']] = $settings[$i]['ExtrasTransNormalized'];
         else
           $plucked[$settings[$i]['key']] = null;
       }

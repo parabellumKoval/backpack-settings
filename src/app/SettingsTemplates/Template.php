@@ -25,7 +25,7 @@ class Template {
         'type' => 'ckeditor',
         'placeholder' => trans('ak_settings::settings.content_placeholder'),
         'fake' => true,
-        'store_in' => 'extras',
+        'store_in' => 'extras_trans',
       ]);
   }
 }

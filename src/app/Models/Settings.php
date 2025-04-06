@@ -26,15 +26,15 @@ class Settings extends Model
     protected $primaryKey = 'id';
     public $timestamps = true;
     // protected $guarded = ['id'];
-    protected $fillable = ['template', 'key', 'name', 'extras'];
+    protected $fillable = ['template', 'key', 'name', 'extras_trans', 'extras'];
     // protected $hidden = [];
     // protected $dates = [];
-    protected $fakeColumns = ['extras'];
-    // protected $casts = [
-    //     'extras' => 'array',
-    // ];
+    protected $fakeColumns = ['extras_trans', 'extras'];
+    protected $casts = [
+        'extras' => 'array',
+    ];
 
-    protected $translatable = ['extras', 'name'];
+    protected $translatable = ['extras_trans', 'name'];
 
     /*
     |--------------------------------------------------------------------------
@@ -75,16 +75,16 @@ class Settings extends Model
     |--------------------------------------------------------------------------
     */
 
-    public function getExtrasDecodedAttribute() {
-      if(empty($this->extras))
+    public function getExtrasTransDecodedAttribute() {
+      if(empty($this->extras_trans))
         return null;
       
-      $data = json_decode($this->extras, true);
+      $data = json_decode($this->extras_trans, true);
       return $data;      
     }
 
-    public function getExtrasNormalizedAttribute() {
-      if(empty($this->extrasDecoded))
+    public function getExtrasTransNormalizedAttribute() {
+      if(empty($this->extras_transDecoded))
         return null;
       
       
@@ -94,7 +94,7 @@ class Settings extends Model
         }else {
           return $item;
         }
-      }, $this->extrasDecoded);
+      }, $this->extras_transDecoded);
     }
 
     /*

@@ -11,7 +11,7 @@ trait DeliveryTrait
         'name' => 'seo_title',
         'label' => 'Заголовок',
         'fake' => true,
-        'store_in' => 'extras',
+        'store_in' => 'extras_trans',
         'tab' => 'Основное',
     ]);  
       
@@ -20,7 +20,7 @@ trait DeliveryTrait
         'label' => 'Текст',
         'type' => 'ckeditor',
         'fake' => true,
-        'store_in' => 'extras',
+        'store_in' => 'extras_trans',
         'tab' => 'Основное',
     ]);  
 

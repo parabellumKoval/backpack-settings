@@ -19,7 +19,7 @@ class SettingsResource extends JsonResource
 		    'key' => $this->key,
 		    'template' => $this->template,
 		    'name' => $this->name,
-		    'extras' => $this->extrasDecoded,
+		    'extras_trans' => $this->extrasTransDecoded,
       ];
     }
 }

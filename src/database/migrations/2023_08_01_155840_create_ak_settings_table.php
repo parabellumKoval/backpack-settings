@@ -15,10 +15,11 @@ class CreateAkSettingsTable extends Migration
     {
         Schema::create('ak_settings', function (Blueprint $table) {
             $table->increments('id');
-            $table->string('template');
+            $table->string('template')->default('common');
             $table->string('key');
             $table->json('name')->nullable();
             $table->json('extras')->nullable();
+            $table->json('extras_trans')->nullable();
 
             $table->timestamps();
         });
