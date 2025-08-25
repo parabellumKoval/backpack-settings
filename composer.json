@@ -1,0 +1,38 @@
+{
+  "name": "parabellumkoval/backpack-settings",
+  "description": "Settings UI & Service for Laravel 8 + Backpack 4.1 (config/DB drivers, tabs, registry, aliases).",
+  "type": "library",
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "Andrej Koval",
+      "email": "example@example.com"
+    },
+    {
+      "name": "Backpack Settings Generator",
+      "email": "noreply@example.com"
+    }
+  ],
+  "require": {
+    "php": "^7.4|^8.0",
+    "illuminate/support": "^8.0",
+    "illuminate/database": "^8.0",
+    "illuminate/config": "^8.0",
+    "illuminate/cache": "^8.0",
+    "backpack/crud": "^4.1"
+  },
+  "autoload": {
+    "psr-4": {
+      "Backpack\\Settings\\": "src/"
+    }
+  },
+  "extra": {
+    "laravel": {
+      "providers": [
+        "Backpack\\Settings\\Providers\\BackpackSettingsServiceProvider"
+      ]
+    }
+  },
+  "minimum-stability": "dev",
+  "prefer-stable": true
+}
