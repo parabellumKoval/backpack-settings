@@ -46,4 +46,16 @@ class DatabaseDriver implements SettingsDriver
             $this->db->table($this->table)->insert($payload);
         }
     }
+
+    public function getByPrefix(string $prefix): array
+    {
+        // ожидаем $prefix без завершающей точки
+        $like = $prefix . '.%';
+
+        // ВАЖНО: индекс по колонке `key`
+        return \DB::table($this->table)
+            ->where('key', 'like', $like)
+            ->pluck('value', 'key')
+            ->toArray();
+    }
 }

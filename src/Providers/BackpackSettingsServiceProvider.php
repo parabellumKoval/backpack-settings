@@ -2,12 +2,14 @@
 
 namespace Backpack\Settings\Providers;
 
+use Illuminate\Foundation\AliasLoader;
 use Illuminate\Support\ServiceProvider;
 use Backpack\Settings\Services\SettingsManager;
 use Backpack\Settings\Drivers\ConfigDriver;
 use Backpack\Settings\Drivers\DatabaseDriver;
 use Backpack\Settings\Services\Registry\Registry;
 use Backpack\Settings\Contracts\SettingsRegistrarInterface;
+use Backpack\Settings\Services\KeyResolver;
 
 class BackpackSettingsServiceProvider extends ServiceProvider
 {
@@ -25,6 +27,15 @@ class BackpackSettingsServiceProvider extends ServiceProvider
             return new Registry();
         });
 
+        // Key resolver
+        $this->app->singleton(KeyResolver::class, function ($app) {
+            return new KeyResolver(
+                $app->make('backpack.settings.registry'),
+                config('backpack-settings.aliases', []),
+                config('backpack-settings.aliases_packages', [])
+            );
+        });
+
         // Bind drivers
         $this->app->singleton('backpack.settings.driver.config', function ($app) {
             return new ConfigDriver($app['config']);
@@ -40,13 +51,23 @@ class BackpackSettingsServiceProvider extends ServiceProvider
             foreach (config('backpack-settings.drivers', ['database','config']) as $name) {
                 $drivers[$name] = $app->make('backpack.settings.driver.'.$name);
             }
-            return new SettingsManager($app['cache.store'] ?? $app['cache'], $drivers);
+            $cacheRepo = method_exists($app['cache'], 'store') ? $app['cache']->store() : $app['cache'];
+            return new SettingsManager(
+                $cacheRepo,
+                $drivers,
+                $app->make(KeyResolver::class)
+            );
         });
+
+
+        // Facades
+        $this->registerFacadeAlias();
     }
 
     public function boot()
     {
         // routes
+        $this->loadRoutesFrom(__DIR__.'/../../routes/backpack-settings-api.php');
         $this->loadRoutesFrom(__DIR__.'/../../routes/backpack-settings.php');
 
         // views
@@ -65,15 +86,27 @@ class BackpackSettingsServiceProvider extends ServiceProvider
             __DIR__.'/../../database/migrations' => database_path('migrations'),
         ], 'migrations');
 
-        // Auto-register registrars from config
+
+        // авто-регистрация регистраторов
         $registry = $this->app->make('backpack.settings.registry');
         foreach (config('backpack-settings.registrars', []) as $registrarClass) {
             if (class_exists($registrarClass)) {
                 $registrar = $this->app->make($registrarClass);
-                if ($registrar instanceof SettingsRegistrarInterface) {
-                    $registrar->register($registry);
-                }
+                $registrar->register($registry);
             }
         }
+
+        // теперь, когда реестр заполнен, обновим карты
+        $this->app->make(KeyResolver::class)->refresh(
+            config('backpack-settings.aliases', []),
+            config('backpack-settings.aliases_packages', [])
+        );
+    }
+
+
+    protected function registerFacadeAlias()
+    {
+        // Делаем alias глобально
+        AliasLoader::getInstance()->alias('Settings', \Backpack\Settings\Facades\Settings::class);
     }
 }

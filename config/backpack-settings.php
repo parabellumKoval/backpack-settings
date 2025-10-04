@@ -2,7 +2,7 @@
 
 return [
     // The DB table for settings
-    'table' => 'backpack_settings',
+    'table' => 'ak_settings',
 
     // Cache settings
     'cache' => [
@@ -20,7 +20,7 @@ return [
     ],
 
     // Access control for the admin UI routes
-    'middleware' => ['web', 'backpack.auth'], // add your own if needed
+    'middleware' => ['web', 'admin'], // add your own if needed
 
     // Route prefix inside /admin
     'route_prefix' => 'settings',
@@ -32,5 +32,19 @@ return [
     'titles' => [
         'default_group' => 'Settings',
         'default_page'  => 'General',
+    ],
+
+
+    // Алиасы в формате: канон => [алиасы...]
+    'aliases' => [
+        // 'store.products.modifications.enabled' => ['store.products_modifications_enabled', 'backpack-store.products_modifications_enabled'],
+    ],
+
+    // Алиасы, привнесённые внешними пакетами.
+    // Формат: 'vendor/package' => [ канон => [алиасы...] ]
+    'aliases_packages' => [
+        // 'vendor/package' => [
+        //     'backpack.store.catalog_table_cache' => ['bs.catalog_table_cache'],
+        // ],
     ],
 ];

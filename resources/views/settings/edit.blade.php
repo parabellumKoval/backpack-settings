@@ -22,7 +22,7 @@
 
 @section('header')
   <div class="container-fluid">
-    <h2 class="mb-0">
+    <h2 class="mb-3">
       {{ $group->title ?: config('backpack-settings.titles.default_group') }}
     </h2>
   </div>
@@ -56,6 +56,13 @@
           @endforeach
         </div>
 
+        <!-- load the view from the application if it exists, otherwise load the one in the package -->
+        @if(view()->exists('vendor.backpack.crud.form_content'))
+          @include('vendor.backpack.crud.form_content', ['fields' => $crud->fields(), 'action' => 'edit'])
+        @else
+          @include('crud::form_content', ['fields' => $crud->fields(), 'action' => 'edit'])
+        @endif
+
         <div class="mt-3">
           <button type="submit" class="btn btn-success">
             <i class="la la-save"></i> {{ trans('backpack::crud.save') }}
@@ -66,6 +73,8 @@
   </div>
 
 @section('after_styles')
+  <link rel="stylesheet" href="{{ asset('packages/backpack/crud/css/crud.css').'?v='.config('backpack.base.cachebusting_string') }}">
+  <link rel="stylesheet" href="{{ asset('packages/backpack/crud/css/form.css').'?v='.config('backpack.base.cachebusting_string') }}">
   @stack('crud_fields_styles')
 @endsection
 

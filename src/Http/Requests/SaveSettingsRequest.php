@@ -9,6 +9,7 @@ class SaveSettingsRequest extends FormRequest
     public function authorize(): bool
     {
         return backpack_auth()->check();
+        // return true;
     }
 
     public function rules(): array
