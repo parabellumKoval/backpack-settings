@@ -35,6 +35,16 @@ return [
     ],
 
 
+    'context' => [
+        'region_query_parameter' => 'region',
+        'region_header' => 'X-Backpack-Region',
+        'region_session_key' => 'backpack.settings.region',
+        'default_region' => null,
+        'supported_regions' => [],
+        'supported_locales' => [],
+    ],
+
+
     // Алиасы в формате: канон => [алиасы...]
     'aliases' => [
         // 'store.products.modifications.enabled' => ['store.products_modifications_enabled', 'backpack-store.products_modifications_enabled'],

@@ -16,32 +16,33 @@ class DatabaseDriver implements SettingsDriver
         $this->table = $table;
     }
 
-    public function get(string $key, ?string $region = null)
+    public function get(string $key, array $context = [])
     {
-        $row = $this->findRow($key, $region);
+        $row = $this->findRow($key, $context);
 
         return $row['value'] ?? null;
     }
 
-    public function has(string $key, ?string $region = null): bool
+    public function has(string $key, array $context = []): bool
     {
-        return $this->findRow($key, $region) !== null;
+        return $this->findRow($key, $context) !== null;
     }
 
-    public function set(string $key, $value, ?string $cast = null, ?string $group = null, ?string $region = null, bool $isTranslatable = false): void
+    public function set(string $key, $value, array $context = []): void
     {
         $now = now();
+        $region = $this->extractRegion($context);
         $payload = [
             'key' => $key,
             'value' => is_scalar($value) ? (string) $value : json_encode($value),
-            'cast' => $cast,
-            'group' => $group,
+            'cast' => $context['cast'] ?? null,
+            'group' => $context['group'] ?? null,
             'region' => $region,
-            'is_translatable' => $isTranslatable,
+            'is_translatable' => (bool) ($context['is_translatable'] ?? $context['translatable'] ?? false),
             'updated_at' => $now,
         ];
 
-        $existing = $this->findRow($key, $region, false);
+        $existing = $this->findRow($key, $context, false);
 
         if ($existing) {
             $this->db->table($this->table)
@@ -53,9 +54,12 @@ class DatabaseDriver implements SettingsDriver
         }
     }
 
-    public function getByPrefix(string $prefix, ?string $region = null): array
+    /**
+     * @param array<string,mixed> $context
+     */
+    public function getByPrefix(string $prefix, array $context = []): array
     {
-        $rows = $this->rowsByPrefix($prefix, $region);
+        $rows = $this->rowsByPrefix($prefix, $context);
 
         $result = [];
         foreach ($rows as $row) {
@@ -70,12 +74,17 @@ class DatabaseDriver implements SettingsDriver
         return $result;
     }
 
-    protected function rowsByPrefix(string $prefix, ?string $region = null): array
+    /**
+     * @param array<string,mixed> $context
+     */
+    protected function rowsByPrefix(string $prefix, array $context = []): array
     {
         $like = $prefix . '.%';
         $columns = ['id', 'key', 'value', 'cast', 'group', 'region', 'is_translatable'];
 
         $rows = [];
+
+        $region = $this->extractRegion($context);
 
         foreach ($this->queryForRegion($region)->where('key', 'like', $like)->get($columns) as $row) {
             $row = (array) $row;
@@ -94,10 +103,14 @@ class DatabaseDriver implements SettingsDriver
         return array_values($rows);
     }
 
-    protected function findRow(string $key, ?string $region = null, bool $withFallback = true): ?array
+    /**
+     * @param array<string,mixed> $context
+     */
+    protected function findRow(string $key, array $context = [], bool $withFallback = true): ?array
     {
         $columns = ['id', 'key', 'value', 'cast', 'group', 'region', 'is_translatable'];
 
+        $region = $this->extractRegion($context);
         $query = $this->queryForRegion($region)->where('key', $key);
         $row = $query->first($columns);
 
@@ -119,5 +132,19 @@ class DatabaseDriver implements SettingsDriver
         }
 
         return $query;
+    }
+
+    /**
+     * @param array<string,mixed> $context
+     */
+    protected function extractRegion(array $context): ?string
+    {
+        $region = $context['region'] ?? null;
+
+        if ($region === null || $region === '') {
+            return null;
+        }
+
+        return (string) $region;
     }
 }

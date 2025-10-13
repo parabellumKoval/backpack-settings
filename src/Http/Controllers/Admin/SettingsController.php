@@ -108,6 +108,7 @@ class SettingsController extends Controller
             $state[$f['key']] = \Settings::get($f['key'], null, [
                 'cast'  => $f['cast'],
                 'group' => $groupSlug,
+                'translatable' => $f['is_translatable'],
             ]);
         }
         return $state;
@@ -130,11 +131,11 @@ class SettingsController extends Controller
                 if ($type === 'checkbox') {
                     $value = $value ? '1' : '0';
                 }
-                \Settings::set($key, $value, ['cast' => $cast, 'group' => $groupSlug]);
+                \Settings::set($key, $value, ['cast' => $cast, 'group' => $groupSlug, 'translatable' => $f['is_translatable']]);
             } else {
                 // для неотмеченного чекбокса — сохранить '0'
                 if ($type === 'checkbox') {
-                    \Settings::set($key, '0', ['cast' => $cast, 'group' => $groupSlug]);
+                    \Settings::set($key, '0', ['cast' => $cast, 'group' => $groupSlug, 'translatable' => $f['is_translatable']]);
                 }
             }
         }
