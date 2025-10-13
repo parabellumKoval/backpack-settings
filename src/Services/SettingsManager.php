@@ -19,7 +19,7 @@ class SettingsManager
         $this->resolver = $resolver;
     }
 
-    public function get(string $key, $default = null)
+    public function get(string $key, $default = null, array $meta = [])
     {
         $canon = $this->resolver->normalize($key);
 
@@ -42,19 +42,23 @@ class SettingsManager
                 return $this->resolveConfigOnly($key, $canon, $default);
             };
 
-            return $ttl > 0
+            $raw = $ttl > 0
                 ? $this->cache->remember($cacheKey, $ttl, $resolver)
                 : $this->cache->rememberForever($cacheKey, $resolver);
+
+            return $this->transformValue($raw, $default, $meta);
         }
 
         // Без кэша
         $isRegistered = $this->resolver->isRegistered($canon);
         if ($isRegistered) {
-            return $this->resolveRegistered($key, $canon, $default);
+            $raw = $this->resolveRegistered($key, $canon, $default);
+            return $this->transformValue($raw, $default, $meta);
         }
         $aggregate = $this->fetchDbByPrefixAggregate([$canon]);
-        if (!empty($aggregate)) return $aggregate;
-        return $this->resolveConfigOnly($key, $canon, $default);
+        if (!empty($aggregate)) return $this->transformValue($aggregate, $default, $meta);
+        $raw = $this->resolveConfigOnly($key, $canon, $default);
+        return $this->transformValue($raw, $default, $meta);
     }
 
     protected function resolveRegistered(string $original, string $canon, $default)
@@ -133,6 +137,9 @@ class SettingsManager
         }
 
         $cast = $meta['cast'] ?? null;
+        if (($meta['translatable'] ?? false) || ($meta['regionable'] ?? false)) {
+            $cast = $cast ?? 'json';
+        }
         $group = $meta['group'] ?? null;
 
         foreach ($this->prioritizedDrivers() as $driver) {
@@ -306,5 +313,98 @@ class SettingsManager
         }
 
         return $result;
+    }
+
+    protected function transformValue($value, $default, array $meta)
+    {
+        $translatable = (bool) ($meta['translatable'] ?? false);
+        $regionable = (bool) ($meta['regionable'] ?? false);
+        $region = $meta['region'] ?? null;
+        $locale = $meta['locale'] ?? null;
+        $returnFull = (bool) ($meta['return_full'] ?? false);
+
+        if (!$translatable && !$regionable) {
+            return $value !== null ? $value : $default;
+        }
+
+        if ($value === null) {
+            $value = $default ?? [];
+        }
+
+        $structure = $this->ensureArray($value);
+
+        if ($regionable) {
+            foreach ($structure as $reg => $regValue) {
+                if ($translatable) {
+                    $structure[$reg] = $this->normalizeTranslatableStructure($regValue, $locale);
+                }
+            }
+        } elseif ($translatable) {
+            $structure = $this->normalizeTranslatableStructure($structure, $locale);
+        }
+
+        if ($returnFull) {
+            return $structure;
+        }
+
+        if ($regionable) {
+            if ($region === null || $region === '') {
+                return $structure;
+            }
+            $regionValue = $structure[$region] ?? null;
+            if ($translatable) {
+                return $this->normalizeTranslatableStructure($regionValue, $locale);
+            }
+            return $regionValue;
+        }
+
+        if ($translatable) {
+            if ($locale === null || $locale === '') {
+                return $structure;
+            }
+            return $structure[$locale] ?? null;
+        }
+
+        return $structure;
+    }
+
+    protected function ensureArray($value): array
+    {
+        if (is_array($value)) {
+            return $value;
+        }
+
+        if ($value === null) {
+            return [];
+        }
+
+        if (is_string($value)) {
+            $decoded = json_decode($value, true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                return $decoded;
+            }
+        }
+
+        return (array) $value;
+    }
+
+    protected function normalizeTranslatableStructure($value, $locale): array
+    {
+        if ($value === null) {
+            return [];
+        }
+
+        if (is_array($value)) {
+            $isAssoc = array_keys($value) !== range(0, count($value) - 1);
+            if ($isAssoc) {
+                return $value;
+            }
+            $first = count($value) ? reset($value) : null;
+            $targetLocale = $locale ?: config('app.locale');
+            return [$targetLocale => $first];
+        }
+
+        $targetLocale = $locale ?: config('app.locale');
+        return [$targetLocale => $value];
     }
 }

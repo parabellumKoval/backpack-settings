@@ -34,6 +34,11 @@ return [
         'default_page'  => 'General',
     ],
 
+    'regions' => [
+        // 'us' => 'United States',
+        // 'eu' => 'Europe',
+    ],
+
 
     // Алиасы в формате: канон => [алиасы...]
     'aliases' => [

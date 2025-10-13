@@ -35,8 +35,50 @@
         <div class="alert alert-success">{{ session('success') }}</div>
       @endif
 
+      @php
+        $selectedLocale = old('locale', $currentLocale);
+        $selectedRegion = old('region', $currentRegion);
+        if (!in_array($selectedLocale, $availableLocales, true)) {
+          $selectedLocale = $currentLocale;
+        }
+        if (!array_key_exists($selectedRegion, $regions ?? [])) {
+          $selectedRegion = $currentRegion;
+        }
+      @endphp
+
       <form method="POST" action="{{ $action }}">
         @csrf
+        <input type="hidden" name="locale" value="{{ $selectedLocale }}">
+        <input type="hidden" name="region" value="{{ $selectedRegion }}">
+
+        <div class="d-flex flex-wrap align-items-center mb-3">
+          @if ($hasTranslatable)
+            @includeIf(backpack_view('inc.multilingual_language_switcher'), [
+              'crud' => $crud,
+              'currentLocale' => $selectedLocale,
+              'locales' => $availableLocales,
+            ])
+          @endif
+
+          @if ($hasRegionable && !empty($regions))
+            <div class="ml-auto">
+              <label for="settings-region" class="d-block mb-1">{{ __('Region') }}</label>
+              <select id="settings-region" class="form-control" onchange="(function(select){
+                var url = new URL(window.location.href);
+                url.searchParams.set('region', select.value);
+                url.searchParams.set('locale', '{{ $selectedLocale }}');
+                window.location = url.toString();
+              })(this)">
+                @foreach ($regions as $value => $label)
+                  <option value="{{ $value }}" {{ $value === $selectedRegion ? 'selected' : '' }}>{{ $label }}</option>
+                @endforeach
+              </select>
+              @if ($errors->has('region'))
+                <div class="invalid-feedback d-block">{{ $errors->first('region') }}</div>
+              @endif
+            </div>
+          @endif
+        </div>
 
         <ul class="nav nav-tabs" role="tablist">
           @foreach ($pages as $i => $page)
@@ -79,6 +121,24 @@
 @endsection
 
 @section('after_scripts')
+  @if ($hasTranslatable)
+    <script>
+      document.addEventListener('DOMContentLoaded', function () {
+        var links = document.querySelectorAll('a[href*="locale="]');
+        links.forEach(function (link) {
+          try {
+            var url = new URL(link.getAttribute('href'), window.location.origin);
+            if ('{{ $selectedRegion }}' !== '') {
+              url.searchParams.set('region', '{{ $selectedRegion }}');
+            } else {
+              url.searchParams.delete('region');
+            }
+            link.setAttribute('href', url.toString());
+          } catch (e) {}
+        });
+      });
+    </script>
+  @endif
   @stack('crud_fields_scripts')
 
   <script>

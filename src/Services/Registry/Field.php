@@ -14,6 +14,9 @@ class Field
     public array $rules = [];
     public array $attributes = [];
 
+    public bool $translatable = false;
+    public bool $regionable = false;
+
     // всё, что Backpack-полю можно передать напрямую (entity, model, options, placeholder, …)
     public array $props = [];
 
@@ -36,6 +39,18 @@ class Field
     public function rules($rules): self { $this->rules = is_array($rules) ? $rules : [$rules]; return $this; }
     public function attrs(array $attrs): self { $this->attributes = $attrs + $this->attributes; return $this; }
 
+    public function translatable(bool $state = true): self
+    {
+        $this->translatable = $state;
+        return $this;
+    }
+
+    public function regionable(bool $state = true): self
+    {
+        $this->regionable = $state;
+        return $this;
+    }
+
     // сахар
     public function options(array $options): self { $this->props['options'] = $options; return $this; }
 
@@ -55,15 +70,49 @@ class Field
         return $this;
     }
 
-    public function toBackpackArray($value = null): array
+    public function toBackpackArray($value = null, array $context = []): array
     {
+        $region = $context['region'] ?? null;
+
+        if ($value === null) {
+            $value = $this->default;
+        }
+
+        if ($this->regionable) {
+            if (is_array($value) && $region !== null && $region !== '') {
+                $value = $value[$region] ?? ($this->translatable ? [] : null);
+            } elseif ($region === null || $region === '') {
+                $value = $this->translatable ? [] : null;
+            }
+        }
+
+        if ($this->translatable) {
+            if (!is_array($value)) {
+                $value = $value === null ? [] : (array) $value;
+            }
+        }
+
+        $name = 'settings['.$this->key.']';
+        if ($this->regionable && $region !== null && $region !== '') {
+            $name .= '['.$region.']';
+        }
+
+        $errorKey = 'settings.'.$this->key;
+        if ($this->regionable && $region !== null && $region !== '') {
+            $errorKey .= '.'.$region;
+        }
+
         $arr = [
-            'name'       => 'settings['.$this->key.']',
+            'name'       => $name,
             'label'      => $this->label ?: $this->key,
             'type'       => $this->type,
             'value'      => $value ?? $this->default,
             'attributes' => $this->attributes,
             'wrapper'    => ['class' => 'form-group col-sm-12'],
+            'translatable' => $this->translatable,
+            'regionable' => $this->regionable,
+            'error_key' => $errorKey,
+            'settings_key' => $this->key,
         ];
         if ($this->tab) $arr['tab'] = $this->tab;
 
@@ -73,6 +122,10 @@ class Field
             } else {
                 $arr[$k] = $v;
             }
+        }
+
+        if ($this->regionable && ($region === null || $region === '')) {
+            $arr['attributes'] = ['disabled' => 'disabled'] + $arr['attributes'];
         }
 
         return $arr;

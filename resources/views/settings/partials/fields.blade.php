@@ -20,7 +20,16 @@
           @include($bpView, ['field' => $field, 'crud' => $crud])
         @else
           @includeIf(config('backpack-settings.view_namespace').'::fields.' . $field['type'], ['field' => $field])
-        @endif  
+        @endif
+
+        @php($fieldErrorKey = $field['error_key'] ?? null)
+        @if ($fieldErrorKey && $errors->has($fieldErrorKey))
+          <div class="invalid-feedback d-block">{{ $errors->first($fieldErrorKey) }}</div>
+        @endif
+
+        @if (!empty($field['regionable']) && $errors->has('region'))
+          <div class="invalid-feedback d-block">{{ $errors->first('region') }}</div>
+        @endif
       @endforeach
     </div>
   </div>

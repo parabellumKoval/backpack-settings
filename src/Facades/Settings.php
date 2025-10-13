@@ -5,7 +5,7 @@ namespace Backpack\Settings\Facades;
 use Illuminate\Support\Facades\Facade;
 
 /**
- * @method static mixed get(string $key, $default = null)
+ * @method static mixed get(string $key, $default = null, array $meta = [])
  * @method static bool has(string $key)
  * @method static array many(array $keys)
  * @method static void set(string $key, $value, array $meta = [])
