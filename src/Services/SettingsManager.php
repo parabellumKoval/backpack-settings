@@ -19,22 +19,23 @@ class SettingsManager
         $this->resolver = $resolver;
     }
 
-    public function get(string $key, $default = null)
+    public function get(string $key, $default = null, array $meta = [])
     {
         $canon = $this->resolver->normalize($key);
+        $region = $meta['region'] ?? null;
 
         // Единый кэш для всех ключей (зарегистрированных и нет)
-        if (config('backpack-settings.cache.enabled', true)) {
+        if (config('backpack-settings.cache.enabled', true) && $region === null) {
             $ttl = (int) config('backpack-settings.cache.ttl', 0);
-            $cacheKey = 'bp_settings:'.$canon;
+            $cacheKey = $this->cacheKey($canon, $region);
 
-            $resolver = function () use ($key, $canon, $default) {
+            $resolver = function () use ($key, $canon, $default, $meta, $region) {
                 $isRegistered = $this->resolver->isRegistered($canon);
                 if ($isRegistered) {
-                    return $this->resolveRegistered($key, $canon, $default);
+                    return $this->resolveRegistered($key, $canon, $default, $region, $meta);
                 }
                 // НОВОЕ: поддержка префикса для незарегистрированных
-                $aggregate = $this->fetchDbByPrefixAggregate([$canon]);
+                $aggregate = $this->fetchDbByPrefixAggregate([$canon], $region);
                 if (!empty($aggregate)) {
                     return $aggregate; // массив по дочерним ключам из БД
                 }
@@ -50,14 +51,14 @@ class SettingsManager
         // Без кэша
         $isRegistered = $this->resolver->isRegistered($canon);
         if ($isRegistered) {
-            return $this->resolveRegistered($key, $canon, $default);
+            return $this->resolveRegistered($key, $canon, $default, $region, $meta);
         }
-        $aggregate = $this->fetchDbByPrefixAggregate([$canon]);
+        $aggregate = $this->fetchDbByPrefixAggregate([$canon], $region);
         if (!empty($aggregate)) return $aggregate;
         return $this->resolveConfigOnly($key, $canon, $default);
     }
 
-    protected function resolveRegistered(string $original, string $canon, $default)
+    protected function resolveRegistered(string $original, string $canon, $default, ?string $region = null, array $meta = [])
     {
         $aliases = $this->resolver->aliasesFor($canon);
 
@@ -66,17 +67,13 @@ class SettingsManager
         foreach ($this->prioritizedDrivers() as $driver) {
             if ($driver instanceof \Backpack\Settings\Drivers\DatabaseDriver) {
                 foreach ($dbKeys as $k) {
-                    if ($driver->has($k)) {
-                        $raw = $driver->get($k);
-                        // cast из БД
-                        $db = app('db'); $table = config('backpack-settings.table');
-                        $row = $db->table($table)->where('key', $k)->first(['cast']);
-                        $cast = $row->cast ?? null;
-                        return $this->castOut($raw, $cast);
+                    if ($driver->has($k, $region)) {
+                        $row = $this->getDbRow($k, $region);
+                        return $this->castOut($row['value'], $row['cast'], $row['is_translatable']);
                     }
                 }
 
-                $aggregate = $this->fetchDbByPrefixAggregate($dbKeys);
+                $aggregate = $this->fetchDbByPrefixAggregate($dbKeys, $region);
                 if (!empty($aggregate)) {
                     return $aggregate; // массив типа ['enabled'=>..., 'type'=>...]
                 }
@@ -134,24 +131,34 @@ class SettingsManager
 
         $cast = $meta['cast'] ?? null;
         $group = $meta['group'] ?? null;
+        $region = $meta['region'] ?? null;
+        $existingRow = $this->getDbRow($canon, $region);
+        $isTranslatable = array_key_exists('is_translatable', $meta)
+            ? (bool) $meta['is_translatable']
+            : ($existingRow['is_translatable'] ?? false);
 
         foreach ($this->prioritizedDrivers() as $driver) {
             if ($driver instanceof \Backpack\Settings\Drivers\DatabaseDriver) {
-                $driver->set($canon, $this->castIn($value, $cast), $cast, $group);
+                $payload = $this->castIn($canon, $value, $cast, $isTranslatable, $region);
+                $driver->set($canon, $payload, $cast, $group, $region, $isTranslatable);
                 break;
             }
         }
 
-        // Инвалидация кэша по канону
-        $this->cache->forget('bp_settings:'.$canon);
-        if ($canon !== $key) $this->cache->forget('bp_settings:'.$key);
+        if ($region === null && config('backpack-settings.cache.enabled', true)) {
+            // Инвалидация кэша по канону
+            $this->cache->forget($this->cacheKey($canon, null));
+            if ($canon !== $key) {
+                $this->cache->forget($this->cacheKey($key, null));
+            }
 
-        // Инвалидируем агрегаты всех предков "a", "a.b", "a.b.c", ...
-        $parts = explode('.', $canon);
-        $prefix = '';
-        foreach ($parts as $i => $p) {
-            $prefix = $prefix ? ($prefix.'.'.$p) : $p;
-            $this->cache->forget('bp_settings:'.$prefix);
+            // Инвалидируем агрегаты всех предков "a", "a.b", "a.b.c", ...
+            $parts = explode('.', $canon);
+            $prefix = '';
+            foreach ($parts as $i => $p) {
+                $prefix = $prefix ? ($prefix.'.'.$p) : $p;
+                $this->cache->forget($this->cacheKey($prefix, null));
+            }
         }
     }
 
@@ -166,9 +173,16 @@ class SettingsManager
         return $ordered;
     }
 
-    public function has(string $key): bool
+    protected function cacheKey(string $key, ?string $region = null): string
     {
-        return $this->get($key, '__MISSING__') !== '__MISSING__';
+        $regionSuffix = $region === null ? 'global' : ('region:' . $region);
+
+        return 'bp_settings:' . $regionSuffix . ':' . $key;
+    }
+
+    public function has(string $key, array $meta = []): bool
+    {
+        return $this->get($key, '__MISSING__', $meta) !== '__MISSING__';
     }
 
     public function many(array $keys): array
@@ -180,11 +194,32 @@ class SettingsManager
         return $result;
     }
 
-    protected function castOut($value, ?string $cast)
+    protected function castOut($value, ?string $cast, bool $isTranslatable = false)
     {
+        if ($isTranslatable) {
+            $translations = $this->decodeJsonToArray($value);
+            if ($translations === []) {
+                return null;
+            }
+
+            $locale = app()->getLocale();
+            $fallback = config('app.fallback_locale');
+
+            if (array_key_exists($locale, $translations)) {
+                return $translations[$locale];
+            }
+
+            if ($fallback && array_key_exists($fallback, $translations)) {
+                return $translations[$fallback];
+            }
+
+            return reset($translations);
+        }
+
         if ($cast === null) {
             return $value;
         }
+
         switch ($cast) {
             case 'bool':
             case 'boolean':
@@ -196,8 +231,8 @@ class SettingsManager
                 return (float) $value;
             case 'json':
             case 'array':
-                $decoded = json_decode($value, true);
-                return $decoded === null ? [] : $decoded;
+                $decoded = $this->decodeJsonToArray($value);
+                return $decoded;
             case 'string':
                 return (string) $value;
             default:
@@ -205,15 +240,32 @@ class SettingsManager
         }
     }
 
-    protected function castIn($value, ?string $cast)
+    protected function castIn(string $key, $value, ?string $cast, bool $isTranslatable = false, ?string $region = null)
     {
+        if ($isTranslatable) {
+            if (is_array($value)) {
+                $translations = $this->sanitizeTranslations($value);
+            } else {
+                $translations = $this->existingTranslations($key, $region);
+                $translations[app()->getLocale()] = $value;
+                $translations = $this->sanitizeTranslations($translations);
+            }
+
+            return json_encode($translations, JSON_UNESCAPED_UNICODE);
+        }
+
         if ($cast === null) {
+            if (is_array($value)) {
+                return json_encode($value, JSON_UNESCAPED_UNICODE);
+            }
+
             return $value;
         }
+
         switch ($cast) {
             case 'json':
             case 'array':
-                return is_string($value) ? $value : json_encode($value);
+                return is_string($value) ? $value : json_encode($value, JSON_UNESCAPED_UNICODE);
             case 'bool':
             case 'boolean':
                 if (is_string($value)) {
@@ -225,86 +277,135 @@ class SettingsManager
         }
     }
 
-    protected function getDbRow(string $key): array
+    protected function getDbRow(string $key, ?string $region = null): array
     {
         $table = config('backpack-settings.table', 'backpack_settings');
-        $row = app('db')->table($table)->where('key', $key)->first(['value','cast']);
-        return ['value' => $row->value ?? null, 'cast' => $row->cast ?? null];
+
+        $query = app('db')->table($table)->where('key', $key);
+        if ($region === null) {
+            $query->whereNull('region');
+        } else {
+            $query->where('region', $region);
+        }
+
+        $row = $query->first(['value','cast','is_translatable']);
+
+        if (! $row && $region !== null) {
+            $row = app('db')->table($table)
+                ->where('key', $key)
+                ->whereNull('region')
+                ->first(['value','cast','is_translatable']);
+        }
+
+        if (! $row) {
+            return [
+                'value' => null,
+                'cast' => null,
+                'is_translatable' => false,
+            ];
+        }
+
+        return [
+            'value' => $row->value ?? null,
+            'cast' => $row->cast ?? null,
+            'is_translatable' => (bool) ($row->is_translatable ?? false),
+        ];
     }
 
-    /**
-     * Ищет все записи с префиксом среди кандидатов (канон/алиасы/оригинал),
-     * возвращает ассоциативный массив относительно "корня" префикса, только первый уровень.
-     *
-     * Пример:
-     *  prefix=profile.referrals.triggers.review.published
-     *  keys в БД:
-     *    profile.referrals.triggers.review.published.enabled => 1
-     *    profile.referrals.triggers.review.published.type    => "auto"
-     *    profile.referrals.triggers.review.published.meta.x  => "y"
-     *  вернёт:
-     *    ['enabled'=>true,'type'=>'auto','meta'=>['x'=>'y']]  // (можно и «плоско», см. заметку ниже)
-     */
-    protected function fetchDbByPrefixAggregate(array $candidatePrefixes)
+    protected function decodeJsonToArray($value): array
     {
-        $table = config('backpack-settings.table', 'backpack_settings');
+        if ($value === null || $value === '') {
+            return [];
+        }
 
-        // соберём LIKE условия по всем кандидатам, чтобы покрыть и канон, и алиасы, и оригинал
-        $query = app('db')->table($table)->select(['key','value','cast']);
-        $query->where(function($q) use ($candidatePrefixes) {
-            foreach ($candidatePrefixes as $i => $pref) {
-                $q->orWhere('key', 'like', $pref . '.%');
+        if (is_array($value)) {
+            return $value;
+        }
+
+        $decoded = json_decode((string) $value, true);
+
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    protected function sanitizeTranslations(array $translations): array
+    {
+        $clean = [];
+        foreach ($translations as $locale => $text) {
+            if ($text === null || $text === '') {
+                continue;
             }
-        });
+            $clean[(string) $locale] = $text;
+        }
 
-        $rows = $query->get();
-        if ($rows->isEmpty()) return [];
+        return $clean;
+    }
 
-        // Определим, по какому из кандидатов строить относительные хвосты:
-        // выбираем самый длинный префикс, который действительно встретился в результатах
+    protected function existingTranslations(string $key, ?string $region = null): array
+    {
+        $row = $this->getDbRow($key, $region);
+
+        if (! $row['value']) {
+            return [];
+        }
+
+        return $this->decodeJsonToArray($row['value']);
+    }
+
+    protected function fetchDbByPrefixAggregate(array $candidatePrefixes, ?string $region = null)
+    {
+        $driver = $this->databaseDriver();
+        if (! $driver) {
+            return [];
+        }
+
         $matchedPrefix = null;
+        $matchedRows = [];
+
         foreach ($candidatePrefixes as $pref) {
-            foreach ($rows as $r) {
-                if (strpos($r->key, $pref . '.') === 0) {
-                    // берём самый длинный из совпавших
-                    if ($matchedPrefix === null || strlen($pref) > strlen($matchedPrefix)) {
-                        $matchedPrefix = $pref;
-                    }
+            $rows = $driver->getByPrefix($pref, $region);
+            if (!empty($rows)) {
+                if ($matchedPrefix === null || strlen($pref) > strlen($matchedPrefix)) {
+                    $matchedPrefix = $pref;
+                    $matchedRows = $rows;
                 }
             }
         }
-        if ($matchedPrefix === null) return [];
 
-        // Собираем дерево по первому уровню (enabled => ..., type => ..., meta => [...])
+        if ($matchedPrefix === null) {
+            return [];
+        }
+
         $result = [];
-        foreach ($rows as $r) {
-            $suffix = substr($r->key, strlen($matchedPrefix) + 1); // отрезаем "prefix."
-            if ($suffix === '' || $suffix === false) continue;
+        foreach ($matchedRows as $fullKey => $row) {
+            $suffix = substr($fullKey, strlen($matchedPrefix) + 1);
+            if ($suffix === '' || $suffix === false) {
+                continue;
+            }
 
-            // если есть вложенность дальше "a.b.c" — положим в подмассив (один проход)
+            $casted = $this->castOut($row['value'], $row['cast'] ?? null, (bool) ($row['is_translatable'] ?? false));
+
             if (strpos($suffix, '.') !== false) {
                 [$head, $tail] = explode('.', $suffix, 2);
-                // простая вложенность: meta['x'] = ...
                 if (!isset($result[$head]) || !is_array($result[$head])) {
                     $result[$head] = [];
                 }
-                // только один уровень расслаивания; глубже можно оставить плоским ключом
-                if (strpos($tail, '.') === false) {
-                    // tail like "x"
-                    $casted = $this->castOut($r->value, $r->cast ?? null);
-                    $result[$head][$tail] = $casted;
-                } else {
-                    // tail like "x.y" — можно сохранить как строку ключа "x.y"
-                    $casted = $this->castOut($r->value, $r->cast ?? null);
-                    $result[$head][$tail] = $casted;
-                }
+                $result[$head][$tail] = $casted;
             } else {
-                // простой ключ "enabled"
-                $casted = $this->castOut($r->value, $r->cast ?? null);
                 $result[$suffix] = $casted;
             }
         }
 
         return $result;
+    }
+
+    protected function databaseDriver(): ?\Backpack\Settings\Drivers\DatabaseDriver
+    {
+        foreach ($this->prioritizedDrivers() as $driver) {
+            if ($driver instanceof \Backpack\Settings\Drivers\DatabaseDriver) {
+                return $driver;
+            }
+        }
+
+        return null;
     }
 }
