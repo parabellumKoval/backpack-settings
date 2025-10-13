@@ -136,7 +136,7 @@ class SettingsController extends Controller
 
     /**
      * Превращаем $group->pages[*]->fields[*] в плоский массив данных полей.
-     * @return array<int, array{key:string,type:?string,cast:?string,translatable:bool,regionable:bool}>
+     * @return array<int, array{key:string,type:?string,cast:?string,is_translatable:bool,is_regionable:bool}>
      */
     protected function flattenFields(object $group): array
     {
@@ -149,8 +149,8 @@ class SettingsController extends Controller
                     'key'  => $f->key,
                     'type' => $f->type ?? null,
                     'cast' => $f->cast ?? null,
-                    'translatable' => $f->translatable ?? false,
-                    'regionable' => $f->regionable ?? false,
+                    'is_translatable' => $f->translatable,
+                    'is_regionable'   => $f->regionable,
                 ];
             }
         }
@@ -159,7 +159,7 @@ class SettingsController extends Controller
 
     /**
      * Снимок значений по ключам.
-     * @param array<int, array{key:string,type:?string,cast:?string,translatable:bool,regionable:bool}> $fields
+     * @param array<int, array{key:string,type:?string,cast:?string,is_translatable:bool,is_regionable:bool}> $fields
      * @return array<string,mixed>
      */
     protected function snapshotValues(array $fields, string $groupSlug, array $context = []): array
@@ -169,11 +169,7 @@ class SettingsController extends Controller
             $state[$f['key']] = Settings::get($f['key'], null, [
                 'cast'  => $f['cast'],
                 'group' => $groupSlug,
-                'translatable' => $f['translatable'] ?? false,
-                'regionable' => $f['regionable'] ?? false,
-                'region' => $context['region'] ?? null,
-                'locale' => $context['locale'] ?? null,
-                'return_full' => true,
+                'translatable' => $f['is_translatable'],
             ]);
         }
         return $state;
@@ -181,7 +177,7 @@ class SettingsController extends Controller
 
     /**
      * Запись значений из payload. Учитываем чекбоксы (неотмеченные → '0').
-     * @param array<int, array{key:string,type:?string,cast:?string,translatable:bool,regionable:bool}> $fields
+     * @param array<int, array{key:string,type:?string,cast:?string,is_translatable:bool,is_regionable:bool}> $fields
      * @param array<string,mixed> $payload
      */
     protected function persistValues(array $fields, array $payload, string $groupSlug, array $context = []): void
@@ -262,11 +258,11 @@ class SettingsController extends Controller
                 if ($type === 'checkbox') {
                     $value = $value ? '1' : '0';
                 }
-                Settings::set($key, $value, ['cast' => $cast, 'group' => $groupSlug]);
+                \Settings::set($key, $value, ['cast' => $cast, 'group' => $groupSlug, 'translatable' => $f['is_translatable']]);
             } else {
                 // для неотмеченного чекбокса — сохранить '0'
                 if ($type === 'checkbox') {
-                    Settings::set($key, '0', ['cast' => $cast, 'group' => $groupSlug]);
+                    \Settings::set($key, '0', ['cast' => $cast, 'group' => $groupSlug, 'translatable' => $f['is_translatable']]);
                 }
             }
         }

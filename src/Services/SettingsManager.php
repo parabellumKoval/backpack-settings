@@ -2,200 +2,344 @@
 
 namespace Backpack\Settings\Services;
 
-use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Backpack\Settings\Contracts\SettingsDriver;
+use Illuminate\Contracts\Cache\Repository as CacheRepository;
+use Illuminate\Support\Arr;
 
 class SettingsManager
 {
     protected CacheRepository $cache;
+
     /** @var array<string, SettingsDriver> */
     protected array $drivers;
+
     protected KeyResolver $resolver;
 
-    public function __construct(CacheRepository $cache, array $drivers, KeyResolver $resolver)
+    protected SettingsContextResolver $contextResolver;
+
+    public function __construct(CacheRepository $cache, array $drivers, KeyResolver $resolver, SettingsContextResolver $contextResolver)
     {
-        $this->cache    = $cache;
-        $this->drivers  = $drivers;
-        $this->resolver = $resolver;
+        $this->cache            = $cache;
+        $this->drivers          = $drivers;
+        $this->resolver         = $resolver;
+        $this->contextResolver  = $contextResolver;
     }
 
-    public function get(string $key, $default = null, array $meta = [])
+    /**
+     * @param array<string,mixed>|object|null $context
+     */
+    public function get(string $key, $default = null, $context = [])
     {
-        $canon = $this->resolver->normalize($key);
+        $context = $this->contextResolver->resolve($context);
+        $canon   = $this->resolver->normalize($key);
 
-        // Единый кэш для всех ключей (зарегистрированных и нет)
-        if (config('backpack-settings.cache.enabled', true)) {
-            $ttl = (int) config('backpack-settings.cache.ttl', 0);
-            $cacheKey = 'bp_settings:'.$canon;
-
-            $resolver = function () use ($key, $canon, $default) {
-                $isRegistered = $this->resolver->isRegistered($canon);
-                if ($isRegistered) {
-                    return $this->resolveRegistered($key, $canon, $default);
-                }
-                // НОВОЕ: поддержка префикса для незарегистрированных
-                $aggregate = $this->fetchDbByPrefixAggregate([$canon]);
-                if (!empty($aggregate)) {
-                    return $aggregate; // массив по дочерним ключам из БД
-                }
-                // как и раньше для незарегистрированных — только config()
-                return $this->resolveConfigOnly($key, $canon, $default);
-            };
-
-            $raw = $ttl > 0
-                ? $this->cache->remember($cacheKey, $ttl, $resolver)
-                : $this->cache->rememberForever($cacheKey, $resolver);
-
-            return $this->transformValue($raw, $default, $meta);
+        if (!config('backpack-settings.cache.enabled', true)) {
+            return $this->resolveValue($key, $canon, $default, $context);
         }
 
-        // Без кэша
-        $isRegistered = $this->resolver->isRegistered($canon);
-        if ($isRegistered) {
-            $raw = $this->resolveRegistered($key, $canon, $default);
-            return $this->transformValue($raw, $default, $meta);
-        }
-        $aggregate = $this->fetchDbByPrefixAggregate([$canon]);
-        if (!empty($aggregate)) return $this->transformValue($aggregate, $default, $meta);
-        $raw = $this->resolveConfigOnly($key, $canon, $default);
-        return $this->transformValue($raw, $default, $meta);
+        $ttl = (int) config('backpack-settings.cache.ttl', 0);
+        $cacheKey = $this->cacheKey($canon, $context);
+
+        $resolver = function () use ($key, $canon, $default, $context) {
+            return $this->resolveValue($key, $canon, $default, $context);
+        };
+
+        return $ttl > 0
+            ? $this->cache->remember($cacheKey, $ttl, $resolver)
+            : $this->cache->rememberForever($cacheKey, $resolver);
     }
 
-    protected function resolveRegistered(string $original, string $canon, $default)
+    /**
+     * @param array<string,mixed> $context
+     */
+    protected function resolveValue(string $original, string $canon, $default, array $context)
+    {
+        if ($this->resolver->isRegistered($canon)) {
+            return $this->resolveRegistered($original, $canon, $default, $context);
+        }
+
+        $aggregate = $this->fetchDbByPrefixAggregate([$canon], $context);
+        if (!empty($aggregate)) {
+            return $aggregate;
+        }
+
+        return $this->resolveConfigOnly($original, $canon, $default);
+    }
+
+    /**
+     * @param array<string,mixed> $context
+     */
+    protected function resolveRegistered(string $original, string $canon, $default, array $context)
     {
         $aliases = $this->resolver->aliasesFor($canon);
-
-        // 2) DB: канон → алиасы → исходный
         $dbKeys = array_values(array_unique(array_merge([$canon], $aliases, [$original])));
+
         foreach ($this->prioritizedDrivers() as $driver) {
             if ($driver instanceof \Backpack\Settings\Drivers\DatabaseDriver) {
                 foreach ($dbKeys as $k) {
-                    if ($driver->has($k)) {
-                        $raw = $driver->get($k);
-                        // cast из БД
-                        $db = app('db'); $table = config('backpack-settings.table');
-                        $row = $db->table($table)->where('key', $k)->first(['cast']);
-                        $cast = $row->cast ?? null;
-                        return $this->castOut($raw, $cast);
+                    if ($driver->has($k, $context)) {
+                        $row = $this->getDbRow($k, $context);
+                        return $this->castOut($row['value'], $row['cast'], $context, $row['is_translatable']);
                     }
                 }
 
-                $aggregate = $this->fetchDbByPrefixAggregate($dbKeys);
+                $aggregate = $this->fetchDbByPrefixAggregate($dbKeys, $context);
                 if (!empty($aggregate)) {
-                    return $aggregate; // массив типа ['enabled'=>..., 'type'=>...]
+                    return $aggregate;
                 }
-                break; // DB проверили — выходим
+
+                break;
             }
         }
 
-        // 3) config() по алиасам
         foreach ($aliases as $a) {
-            if (config()->has($a)) return config($a);
+            if (config()->has($a)) {
+                return config($a);
+            }
         }
-        // (на всякий случай) если original — не в списке алиасов
+
         if (!in_array($original, $aliases, true) && $original !== $canon && config()->has($original)) {
             return config($original);
         }
 
-        // 4) config() по канону
-        if (config()->has($canon)) return config($canon);
+        if (config()->has($canon)) {
+            return config($canon);
+        }
 
         return $default;
     }
 
     protected function resolveConfigOnly(string $original, string $canon, $default)
     {
-        // Если ключ попадает как алиас в глобальных алиасах — читаем канон из config()
         $aliases = $this->resolver->aliasesFor($canon);
-        // Сценарии:
-        // a) original - алиас (aliasToCanon вернул канон, он != original)
-        if ($canon !== $original) {
-            // читаем config(канон)
-            if (config()->has($canon)) return config($canon);
+
+        if ($canon !== $original && config()->has($canon)) {
+            return config($canon);
         }
 
-        // b) original - канон (может иметь алиасы, но не зарегистрирован)
-        // Сначала пробуем config(original)
-        if (config()->has($original)) return config($original);
+        if (config()->has($original)) {
+            return config($original);
+        }
 
-        // c) если есть алиасы для canon (из конфига), вдруг один из них реально лежит в конфиге
         foreach ($aliases as $a) {
-            if (config()->has($a)) return config($a);
+            if (config()->has($a)) {
+                return config($a);
+            }
         }
 
         return $default;
     }
 
-    public function set(string $key, $value, array $meta = []): void
+    /**
+     * @param array<string,mixed>|object|null $context
+     */
+    public function set(string $key, $value, $context = []): void
     {
-        $canon = $this->resolver->normalize($key);
+        $context = $this->contextResolver->resolve($context);
+        $canon   = $this->resolver->normalize($key);
 
-        // Писать можно ТОЛЬКО зарегистрированные ключи
         if (!$this->resolver->isRegistered($canon)) {
-            // мягко игнорируем (или можно бросать исключение - на твой вкус)
             return;
         }
 
-        $cast = $meta['cast'] ?? null;
-        if (($meta['translatable'] ?? false) || ($meta['regionable'] ?? false)) {
-            $cast = $cast ?? 'json';
-        }
-        $group = $meta['group'] ?? null;
+        $existingRow = $this->getDbRow($canon, $context);
+        $context['cast'] = $context['cast'] ?? ($existingRow['cast'] ?? null);
+        $context['is_translatable'] = array_key_exists('is_translatable', $context)
+            ? (bool) $context['is_translatable']
+            : (bool) ($context['translatable'] ?? $existingRow['is_translatable'] ?? false);
 
         foreach ($this->prioritizedDrivers() as $driver) {
             if ($driver instanceof \Backpack\Settings\Drivers\DatabaseDriver) {
-                $driver->set($canon, $this->castIn($value, $cast), $cast, $group);
+                $payload = $this->castIn($canon, $value, $context, $existingRow);
+                $driver->set($canon, $payload, $context);
                 break;
             }
         }
 
-        // Инвалидация кэша по канону
-        $this->cache->forget('bp_settings:'.$canon);
-        if ($canon !== $key) $this->cache->forget('bp_settings:'.$key);
-
-        // Инвалидируем агрегаты всех предков "a", "a.b", "a.b.c", ...
-        $parts = explode('.', $canon);
-        $prefix = '';
-        foreach ($parts as $i => $p) {
-            $prefix = $prefix ? ($prefix.'.'.$p) : $p;
-            $this->cache->forget('bp_settings:'.$prefix);
+        if (config('backpack-settings.cache.enabled', true)) {
+            $this->forgetCacheVariants($canon, $key, $context);
         }
+    }
+
+    /**
+     * @param array<string,mixed>|object|null $context
+     */
+    public function has(string $key, $context = []): bool
+    {
+        return $this->get($key, '__MISSING__', $context) !== '__MISSING__';
+    }
+
+    /**
+     * @param array<string,mixed>|object|null $context
+     */
+    public function many(array $keys, $context = []): array
+    {
+        $result = [];
+        foreach ($keys as $key) {
+            $result[$key] = $this->get($key, null, $context);
+        }
+
+        return $result;
     }
 
     protected function prioritizedDrivers(): array
     {
         $ordered = [];
-        foreach (config('backpack-settings.drivers', ['database','config']) as $name) {
+        foreach (config('backpack-settings.drivers', ['database', 'config']) as $name) {
             if (isset($this->drivers[$name])) {
                 $ordered[] = $this->drivers[$name];
             }
         }
+
         return $ordered;
     }
 
-    public function has(string $key): bool
+    /**
+     * @param array<string,mixed> $context
+     */
+    protected function cacheKey(string $key, array $context): string
     {
-        return $this->get($key, '__MISSING__') !== '__MISSING__';
+        $regionPart = $this->sanitizeCacheSegment($context['region'] ?? null, 'region-global');
+        $localePart = $this->sanitizeCacheSegment($context['locale'] ?? null, 'locale-default');
+        $keyPart = $this->sanitizeCacheSegment($key, $key);
+
+        return sprintf('bp_settings:%s:%s:%s', $regionPart, $localePart, $keyPart);
     }
 
-    public function many(array $keys): array
+    protected function sanitizeCacheSegment($value, string $default): string
     {
-        $result = [];
-        foreach ($keys as $key) {
-            $result[$key] = $this->get($key);
+        if ($value === null || $value === '') {
+            return $default;
         }
-        return $result;
+
+        $value = (string) $value;
+        $sanitized = preg_replace('/[^A-Za-z0-9_\-\.]/', '_', $value);
+
+        return $sanitized === '' ? $default : $sanitized;
     }
 
-    protected function castOut($value, ?string $cast)
+    /**
+     * @param array<string,mixed> $context
+     */
+    protected function forgetCacheVariants(string $canon, string $original, array $context): void
+    {
+        $keys = array_unique(array_merge([$canon, $original], $this->resolver->aliasesFor($canon)));
+
+        foreach ($keys as $key) {
+            $this->forgetCacheForKey($key, $context);
+        }
+
+        $parts = explode('.', $canon);
+        $prefix = '';
+        foreach ($parts as $part) {
+            $prefix = $prefix ? $prefix . '.' . $part : $part;
+            $this->forgetCacheForKey($prefix, $context);
+        }
+    }
+
+    /**
+     * @param array<string,mixed> $context
+     */
+    protected function forgetCacheForKey(string $key, array $context): void
+    {
+        foreach ($this->cacheRegions($context) as $region) {
+            foreach ($this->cacheLocales($context) as $locale) {
+                $variantContext = $context;
+                $variantContext['region'] = $region;
+                $variantContext['locale'] = $locale;
+                $this->cache->forget($this->cacheKey($key, $variantContext));
+            }
+        }
+    }
+
+    /**
+     * @param array<string,mixed> $context
+     * @return array<int,?string>
+     */
+    protected function cacheRegions(array $context): array
+    {
+        $regions = (array) config('backpack-settings.context.supported_regions', []);
+        if (!in_array(null, $regions, true)) {
+            $regions[] = null;
+        }
+
+        $current = $context['region'] ?? null;
+        if (!in_array($current, $regions, true)) {
+            $regions[] = $current;
+        }
+
+        return array_values(array_unique($regions, SORT_REGULAR));
+    }
+
+    /**
+     * @param array<string,mixed> $context
+     * @return array<int,?string>
+     */
+    protected function cacheLocales(array $context): array
+    {
+        $locales = (array) config('backpack-settings.context.supported_locales', []);
+        $current = $context['locale'] ?? null;
+        $fallback = $context['fallback_locale'] ?? null;
+
+        if ($current !== null && !in_array($current, $locales, true)) {
+            $locales[] = $current;
+        }
+
+        if ($fallback !== null && !in_array($fallback, $locales, true)) {
+            $locales[] = $fallback;
+        }
+
+        if (empty($locales)) {
+            $locales[] = null;
+        }
+
+        return array_values(array_unique($locales));
+    }
+
+    /**
+     * @param array<string,mixed> $context
+     */
+    protected function castOut($value, ?string $cast, array $context, bool $isTranslatable = false)
+    {
+        if ($isTranslatable) {
+            $translations = $this->decodeJsonToArray($value);
+            if ($translations === []) {
+                return null;
+            }
+
+            $locale = $context['locale'] ?? null;
+            $fallback = $context['fallback_locale'] ?? null;
+
+            if ($locale && array_key_exists($locale, $translations)) {
+                return $this->applyCastOut($translations[$locale], $cast);
+            }
+
+            if ($fallback && array_key_exists($fallback, $translations)) {
+                return $this->applyCastOut($translations[$fallback], $cast);
+            }
+
+            $first = reset($translations);
+            return $this->applyCastOut($first, $cast);
+        }
+
+        return $this->applyCastOut($value, $cast);
+    }
+
+    protected function applyCastOut($value, ?string $cast)
     {
         if ($cast === null) {
             return $value;
         }
+
         switch ($cast) {
             case 'bool':
             case 'boolean':
-                return filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? false;
+                if (is_string($value)) {
+                    $filtered = filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+                    return $filtered ?? false;
+                }
+
+                return (bool) $value;
             case 'int':
             case 'integer':
                 return (int) $value;
@@ -203,8 +347,7 @@ class SettingsManager
                 return (float) $value;
             case 'json':
             case 'array':
-                $decoded = json_decode($value, true);
-                return $decoded === null ? [] : $decoded;
+                return $this->decodeJsonToArray($value);
             case 'string':
                 return (string) $value;
             default:
@@ -212,199 +355,208 @@ class SettingsManager
         }
     }
 
-    protected function castIn($value, ?string $cast)
+    /**
+     * @param array<string,mixed> $context
+     * @param array<string,mixed> $existingRow
+     */
+    protected function castIn(string $key, $value, array $context, array $existingRow = [])
     {
+        $cast = $context['cast'] ?? null;
+        $isTranslatable = (bool) ($context['is_translatable'] ?? false);
+
+        if ($isTranslatable) {
+            if (is_array($value) && $this->isAssoc($value)) {
+                $translations = $this->sanitizeTranslations($value);
+            } else {
+                $translations = $this->existingTranslations($key, $context, $existingRow);
+                $locale = $context['locale'] ?? app()->getLocale();
+                if ($locale !== null) {
+                    $translations[$locale] = $value;
+                }
+                $translations = $this->sanitizeTranslations($translations);
+            }
+
+            return json_encode($translations, JSON_UNESCAPED_UNICODE);
+        }
+
         if ($cast === null) {
+            if (is_array($value)) {
+                return json_encode($value, JSON_UNESCAPED_UNICODE);
+            }
+
             return $value;
         }
+
         switch ($cast) {
             case 'json':
             case 'array':
-                return is_string($value) ? $value : json_encode($value);
+                return is_string($value) ? $value : json_encode($value, JSON_UNESCAPED_UNICODE);
             case 'bool':
             case 'boolean':
                 if (is_string($value)) {
-                    $value = in_array(strtolower($value), ['1','true','on','yes'], true);
+                    $value = in_array(strtolower($value), ['1', 'true', 'on', 'yes'], true);
                 }
+
                 return $value ? '1' : '0';
             default:
                 return (string) $value;
         }
     }
 
-    protected function getDbRow(string $key): array
+    /**
+     * @param array<string,mixed> $context
+     */
+    protected function getDbRow(string $key, array $context): array
     {
+        $region = $context['region'] ?? null;
         $table = config('backpack-settings.table', 'backpack_settings');
-        $row = app('db')->table($table)->where('key', $key)->first(['value','cast']);
-        return ['value' => $row->value ?? null, 'cast' => $row->cast ?? null];
+
+        $query = app('db')->table($table)->where('key', $key);
+        if ($region === null) {
+            $query->whereNull('region');
+        } else {
+            $query->where('region', $region);
+        }
+
+        $row = $query->first(['value', 'cast', 'is_translatable']);
+
+        if (!$row && $region !== null) {
+            $row = app('db')->table($table)
+                ->where('key', $key)
+                ->whereNull('region')
+                ->first(['value', 'cast', 'is_translatable']);
+        }
+
+        if (!$row) {
+            return [
+                'value' => null,
+                'cast' => null,
+                'is_translatable' => false,
+            ];
+        }
+
+        return [
+            'value' => $row->value ?? null,
+            'cast' => $row->cast ?? null,
+            'is_translatable' => (bool) ($row->is_translatable ?? false),
+        ];
+    }
+
+    protected function decodeJsonToArray($value): array
+    {
+        if ($value === null || $value === '') {
+            return [];
+        }
+
+        if (is_array($value)) {
+            return $value;
+        }
+
+        if ($value instanceof \JsonSerializable) {
+            $value = $value->jsonSerialize();
+            if (is_array($value)) {
+                return $value;
+            }
+        }
+
+        $decoded = json_decode((string) $value, true);
+
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    protected function sanitizeTranslations(array $translations): array
+    {
+        $clean = [];
+        foreach ($translations as $locale => $text) {
+            if ($text === null) {
+                continue;
+            }
+
+            if (is_string($text) && $text === '') {
+                continue;
+            }
+
+            $clean[(string) $locale] = $text;
+        }
+
+        return $clean;
     }
 
     /**
-     * Ищет все записи с префиксом среди кандидатов (канон/алиасы/оригинал),
-     * возвращает ассоциативный массив относительно "корня" префикса, только первый уровень.
-     *
-     * Пример:
-     *  prefix=profile.referrals.triggers.review.published
-     *  keys в БД:
-     *    profile.referrals.triggers.review.published.enabled => 1
-     *    profile.referrals.triggers.review.published.type    => "auto"
-     *    profile.referrals.triggers.review.published.meta.x  => "y"
-     *  вернёт:
-     *    ['enabled'=>true,'type'=>'auto','meta'=>['x'=>'y']]  // (можно и «плоско», см. заметку ниже)
+     * @param array<string,mixed> $context
+     * @param array<string,mixed> $existingRow
      */
-    protected function fetchDbByPrefixAggregate(array $candidatePrefixes)
+    protected function existingTranslations(string $key, array $context, array $existingRow = []): array
     {
-        $table = config('backpack-settings.table', 'backpack_settings');
+        if (!empty($existingRow)) {
+            $value = $existingRow['value'] ?? null;
+        } else {
+            $row = $this->getDbRow($key, $context);
+            $value = $row['value'] ?? null;
+        }
 
-        // соберём LIKE условия по всем кандидатам, чтобы покрыть и канон, и алиасы, и оригинал
-        $query = app('db')->table($table)->select(['key','value','cast']);
-        $query->where(function($q) use ($candidatePrefixes) {
-            foreach ($candidatePrefixes as $i => $pref) {
-                $q->orWhere('key', 'like', $pref . '.%');
-            }
-        });
+        if (!$value) {
+            return [];
+        }
 
-        $rows = $query->get();
-        if ($rows->isEmpty()) return [];
+        return $this->decodeJsonToArray($value);
+    }
 
-        // Определим, по какому из кандидатов строить относительные хвосты:
-        // выбираем самый длинный префикс, который действительно встретился в результатах
+    /**
+     * @param array<int,string> $candidatePrefixes
+     * @param array<string,mixed> $context
+     */
+    protected function fetchDbByPrefixAggregate(array $candidatePrefixes, array $context)
+    {
+        $driver = $this->databaseDriver();
+        if (!$driver) {
+            return [];
+        }
+
         $matchedPrefix = null;
+        $matchedRows = [];
+
         foreach ($candidatePrefixes as $pref) {
-            foreach ($rows as $r) {
-                if (strpos($r->key, $pref . '.') === 0) {
-                    // берём самый длинный из совпавших
-                    if ($matchedPrefix === null || strlen($pref) > strlen($matchedPrefix)) {
-                        $matchedPrefix = $pref;
-                    }
+            $rows = $driver->getByPrefix($pref, $context);
+            if (!empty($rows)) {
+                if ($matchedPrefix === null || strlen($pref) > strlen($matchedPrefix)) {
+                    $matchedPrefix = $pref;
+                    $matchedRows = $rows;
                 }
             }
         }
-        if ($matchedPrefix === null) return [];
 
-        // Собираем дерево по первому уровню (enabled => ..., type => ..., meta => [...])
+        if ($matchedPrefix === null) {
+            return [];
+        }
+
         $result = [];
-        foreach ($rows as $r) {
-            $suffix = substr($r->key, strlen($matchedPrefix) + 1); // отрезаем "prefix."
-            if ($suffix === '' || $suffix === false) continue;
-
-            // если есть вложенность дальше "a.b.c" — положим в подмассив (один проход)
-            if (strpos($suffix, '.') !== false) {
-                [$head, $tail] = explode('.', $suffix, 2);
-                // простая вложенность: meta['x'] = ...
-                if (!isset($result[$head]) || !is_array($result[$head])) {
-                    $result[$head] = [];
-                }
-                // только один уровень расслаивания; глубже можно оставить плоским ключом
-                if (strpos($tail, '.') === false) {
-                    // tail like "x"
-                    $casted = $this->castOut($r->value, $r->cast ?? null);
-                    $result[$head][$tail] = $casted;
-                } else {
-                    // tail like "x.y" — можно сохранить как строку ключа "x.y"
-                    $casted = $this->castOut($r->value, $r->cast ?? null);
-                    $result[$head][$tail] = $casted;
-                }
-            } else {
-                // простой ключ "enabled"
-                $casted = $this->castOut($r->value, $r->cast ?? null);
-                $result[$suffix] = $casted;
+        foreach ($matchedRows as $fullKey => $row) {
+            $suffix = substr($fullKey, strlen($matchedPrefix) + 1);
+            if ($suffix === '' || $suffix === false) {
+                continue;
             }
+
+            $casted = $this->castOut($row['value'], $row['cast'] ?? null, $context, (bool) ($row['is_translatable'] ?? false));
+            Arr::set($result, $suffix, $casted);
         }
 
         return $result;
     }
 
-    protected function transformValue($value, $default, array $meta)
+    protected function databaseDriver(): ?\Backpack\Settings\Drivers\DatabaseDriver
     {
-        $translatable = (bool) ($meta['translatable'] ?? false);
-        $regionable = (bool) ($meta['regionable'] ?? false);
-        $region = $meta['region'] ?? null;
-        $locale = $meta['locale'] ?? null;
-        $returnFull = (bool) ($meta['return_full'] ?? false);
-
-        if (!$translatable && !$regionable) {
-            return $value !== null ? $value : $default;
-        }
-
-        if ($value === null) {
-            $value = $default ?? [];
-        }
-
-        $structure = $this->ensureArray($value);
-
-        if ($regionable) {
-            foreach ($structure as $reg => $regValue) {
-                if ($translatable) {
-                    $structure[$reg] = $this->normalizeTranslatableStructure($regValue, $locale);
-                }
+        foreach ($this->prioritizedDrivers() as $driver) {
+            if ($driver instanceof \Backpack\Settings\Drivers\DatabaseDriver) {
+                return $driver;
             }
-        } elseif ($translatable) {
-            $structure = $this->normalizeTranslatableStructure($structure, $locale);
         }
 
-        if ($returnFull) {
-            return $structure;
-        }
-
-        if ($regionable) {
-            if ($region === null || $region === '') {
-                return $structure;
-            }
-            $regionValue = $structure[$region] ?? null;
-            if ($translatable) {
-                return $this->normalizeTranslatableStructure($regionValue, $locale);
-            }
-            return $regionValue;
-        }
-
-        if ($translatable) {
-            if ($locale === null || $locale === '') {
-                return $structure;
-            }
-            return $structure[$locale] ?? null;
-        }
-
-        return $structure;
+        return null;
     }
 
-    protected function ensureArray($value): array
+    protected function isAssoc(array $value): bool
     {
-        if (is_array($value)) {
-            return $value;
-        }
-
-        if ($value === null) {
-            return [];
-        }
-
-        if (is_string($value)) {
-            $decoded = json_decode($value, true);
-            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
-                return $decoded;
-            }
-        }
-
-        return (array) $value;
-    }
-
-    protected function normalizeTranslatableStructure($value, $locale): array
-    {
-        if ($value === null) {
-            return [];
-        }
-
-        if (is_array($value)) {
-            $isAssoc = array_keys($value) !== range(0, count($value) - 1);
-            if ($isAssoc) {
-                return $value;
-            }
-            $first = count($value) ? reset($value) : null;
-            $targetLocale = $locale ?: config('app.locale');
-            return [$targetLocale => $first];
-        }
-
-        $targetLocale = $locale ?: config('app.locale');
-        return [$targetLocale => $value];
+        return array_keys($value) !== range(0, count($value) - 1);
     }
 }

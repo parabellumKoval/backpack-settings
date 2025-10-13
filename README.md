@@ -42,6 +42,7 @@ class StoreSettingsRegistrar implements SettingsRegistrarInterface
                         ->default(false)
                         ->cast('bool')
                         ->tab('Основное')
+                        ->regionable()
                     );
                     $page->add(Field::make('store.products.modifications.mode', 'select')
                         ->label('Режим модификаций')
@@ -56,6 +57,7 @@ class StoreSettingsRegistrar implements SettingsRegistrarInterface
                         ->label('Наложенный платеж')
                         ->default(true)
                         ->cast('bool')
+                        ->translatable()
                     );
                 });
         });
@@ -90,6 +92,45 @@ if (Settings::get('store.products.modifications.enabled')) {
     // ...
 }
 ```
+
+## Registry helpers
+
+- Resolve the field metadata (including regional/translatable flags) for a canonical key at runtime via `SettingsRegistry::fieldByKey('store.payment.cod_enabled')`.
+
+## Regional & translatable settings
+
+- Install the translations helper config if you need to customise locales resolution:
+
+  ```bash
+  php artisan vendor:publish --provider="Spatie\\Translatable\\TranslatableServiceProvider" --tag=translatable-config
+  ```
+
+- Settings stored in the database now support an optional `region` scope (`null` keeps the legacy "global" value). When reading a key with a region specified, the database driver will fall back to the global entry if the regional one is missing.
+- Mark a record as translatable by calling `Field::make(...)->translatable()` (registrars can still pass the `$meta['is_translatable']` flag manually if needed). Translatable values are stored as locale=>value JSON maps and transparently resolved for the current app locale.
+- Enable per-region overrides for a key by using `Field::make(...)->regionable()`.
+
+## Migrating existing data
+
+1. Run the new migration to introduce the `region`, `is_translatable` columns and composite unique index. All legacy rows will automatically end up with `region = null`.
+2. For projects that already keep per-locale rows, consolidate them into a single JSON payload:
+
+   ```php
+   use Backpack\Settings\Models\Setting;
+
+   Setting::query()
+       ->where('is_translatable', true)
+       ->whereNull('region')
+       ->each(function (Setting $setting) {
+           $locale = config('app.fallback_locale');
+           $setting->value = [
+               $locale => $setting->getRawOriginal('value'),
+           ];
+           $setting->save();
+       });
+   ```
+
+   When multiple rows currently represent the same logical key for different locales, merge them manually into a single record and set `is_translatable = true` before saving the JSON payload.
+3. If you have per-region overrides today, copy them into new records with the corresponding `region` value; global defaults stay at `region = null`.
 
 ## Add custom fields
 
