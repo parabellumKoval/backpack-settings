@@ -10,6 +10,7 @@ use Backpack\Settings\Drivers\DatabaseDriver;
 use Backpack\Settings\Services\Registry\Registry;
 use Backpack\Settings\Contracts\SettingsRegistrarInterface;
 use Backpack\Settings\Services\KeyResolver;
+use Backpack\Settings\Services\SettingsContextResolver;
 
 class BackpackSettingsServiceProvider extends ServiceProvider
 {
@@ -45,6 +46,13 @@ class BackpackSettingsServiceProvider extends ServiceProvider
             return new DatabaseDriver($app['db']->connection(), config('backpack-settings.table'));
         });
 
+        $this->app->singleton(SettingsContextResolver::class, function ($app) {
+            return new SettingsContextResolver(
+                $app->make('request'),
+                $app['config']
+            );
+        });
+
         // Bind manager
         $this->app->singleton('backpack.settings', function ($app) {
             $drivers = [];
@@ -55,7 +63,8 @@ class BackpackSettingsServiceProvider extends ServiceProvider
             return new SettingsManager(
                 $cacheRepo,
                 $drivers,
-                $app->make(KeyResolver::class)
+                $app->make(KeyResolver::class),
+                $app->make(SettingsContextResolver::class)
             );
         });
 
