@@ -7,7 +7,8 @@ use Illuminate\Support\Facades\Facade;
 /**
  * @method static void group(string $slug, \Closure $callback)
  * @method static array groups()
- * @method static \Backpack\Settings\Services\Registry\Registry getRegistry()
+ * @method static \Backpack\Settings\Services\Registry\SettingsGroup|null get(string $slug)
+ * @method static \Backpack\Settings\Services\Registry\Field|null fieldByKey(string $key)
  */
 class SettingsRegistry extends Facade
 {
