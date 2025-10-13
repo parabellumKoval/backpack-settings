@@ -91,6 +91,40 @@ if (Settings::get('store.products.modifications.enabled')) {
 }
 ```
 
+## Regional & translatable settings
+
+- Install the translations helper config if you need to customise locales resolution:
+
+  ```bash
+  php artisan vendor:publish --provider="Spatie\\Translatable\\TranslatableServiceProvider" --tag=translatable-config
+  ```
+
+- Settings stored in the database now support an optional `region` scope (`null` keeps the legacy "global" value). When reading a key with a region specified, the database driver will fall back to the global entry if the regional one is missing.
+- Mark a record as translatable by setting its `is_translatable` flag (registrars can pass it through `$meta['is_translatable']`). Translatable values are stored as locale=>value JSON maps and transparently resolved for the current app locale.
+
+## Migrating existing data
+
+1. Run the new migration to introduce the `region`, `is_translatable` columns and composite unique index. All legacy rows will automatically end up with `region = null`.
+2. For projects that already keep per-locale rows, consolidate them into a single JSON payload:
+
+   ```php
+   use Backpack\Settings\Models\Setting;
+
+   Setting::query()
+       ->where('is_translatable', true)
+       ->whereNull('region')
+       ->each(function (Setting $setting) {
+           $locale = config('app.fallback_locale');
+           $setting->value = [
+               $locale => $setting->getRawOriginal('value'),
+           ];
+           $setting->save();
+       });
+   ```
+
+   When multiple rows currently represent the same logical key for different locales, merge them manually into a single record and set `is_translatable = true` before saving the JSON payload.
+3. If you have per-region overrides today, copy them into new records with the corresponding `region` value; global defaults stay at `region = null`.
+
 ## Add custom fields
 
 Put blade views under `resources/views/vendor/backpack-settings/fields/yourtype.blade.php`

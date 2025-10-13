@@ -14,17 +14,17 @@ class ConfigDriver implements SettingsDriver
         $this->config = $config;
     }
 
-    public function get(string $key)
+    public function get(string $key, ?string $region = null)
     {
         return $this->config->get($key);
     }
 
-    public function has(string $key): bool
+    public function has(string $key, ?string $region = null): bool
     {
         return $this->config->has($key);
     }
 
-    public function set(string $key, $value, ?string $cast = null, ?string $group = null): void
+    public function set(string $key, $value, ?string $cast = null, ?string $group = null, ?string $region = null, bool $isTranslatable = false): void
     {
         // Config is read-only; do nothing.
     }
