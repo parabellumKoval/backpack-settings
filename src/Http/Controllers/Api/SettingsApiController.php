@@ -58,4 +58,53 @@ class SettingsApiController extends Controller
                 return $value;
         }
     }
+
+    /**
+     * GET /api/settings/nested
+     * Returns settings as a nested object structure based on dot notation
+     */
+    public function nested(Request $request)
+    {
+        $table = config('backpack-settings.table', 'backpack_settings');
+
+        $q = DB::table($table)->select(['key', 'value', 'cast', 'group', 'updated_at']);
+
+        if ($group = $request->query('group')) {
+            $q->where('group', $group);
+        }
+        if ($prefix = $request->query('prefix')) {
+            $q->where('key', 'like', $prefix.'%');
+        }
+
+        $rows = $q->get();
+        $result = [];
+
+        foreach ($rows as $row) {
+            $keys = explode('.', $row->key);
+            $value = $this->castOut($row->value, $row->cast);
+            
+            $this->arraySet($result, $keys, $value);
+        }
+
+        return response()->json($result);
+    }
+
+    /**
+     * Helper method to set nested array values
+     */
+    protected function arraySet(&$array, $keys, $value)
+    {
+        $current = &$array;
+        
+        foreach ($keys as $i => $key) {
+            if ($i === count($keys) - 1) {
+                $current[$key] = $value;
+            } else {
+                if (!isset($current[$key]) || !is_array($current[$key])) {
+                    $current[$key] = [];
+                }
+                $current = &$current[$key];
+            }
+        }
+    }
 }

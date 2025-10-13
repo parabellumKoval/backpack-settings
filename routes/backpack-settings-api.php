@@ -9,4 +9,6 @@ Route::group([
 ], function () {
     // Все записи из БД (простая выдача)
     Route::get('/', [SettingsApiController::class, 'db'])->name('backpack.settings.api.db');
+    // Все записи из БД (вложенная структура)
+    Route::get('/nested', [SettingsApiController::class, 'nested'])->name('backpack.settings.api.nested');
 });
