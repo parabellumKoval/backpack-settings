@@ -75,7 +75,7 @@ class SettingsController extends Controller
 
     /**
      * Превращаем $group->pages[*]->fields[*] в плоский массив данных полей.
-     * @return array<int, array{key:string,type:?string,cast:?string}>
+     * @return array<int, array{key:string,type:?string,cast:?string,is_translatable:bool,is_regionable:bool}>
      */
     protected function flattenFields(object $group): array
     {
@@ -88,6 +88,8 @@ class SettingsController extends Controller
                     'key'  => $f->key,
                     'type' => $f->type ?? null,
                     'cast' => $f->cast ?? null,
+                    'is_translatable' => $f->translatable,
+                    'is_regionable'   => $f->regionable,
                 ];
             }
         }
@@ -96,7 +98,7 @@ class SettingsController extends Controller
 
     /**
      * Снимок значений по ключам.
-     * @param array<int, array{key:string,type:?string,cast:?string}> $fields
+     * @param array<int, array{key:string,type:?string,cast:?string,is_translatable:bool,is_regionable:bool}> $fields
      * @return array<string,mixed>
      */
     protected function snapshotValues(array $fields, string $groupSlug): array
@@ -113,7 +115,7 @@ class SettingsController extends Controller
 
     /**
      * Запись значений из payload. Учитываем чекбоксы (неотмеченные → '0').
-     * @param array<int, array{key:string,type:?string,cast:?string}> $fields
+     * @param array<int, array{key:string,type:?string,cast:?string,is_translatable:bool,is_regionable:bool}> $fields
      * @param array<string,mixed> $payload
      */
     protected function persistValues(array $fields, array $payload, string $groupSlug): void

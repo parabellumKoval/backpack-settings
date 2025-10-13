@@ -10,9 +10,12 @@ class SettingsGroup
     /** @var Page[] */
     public array $pages = [];
 
-    public function __construct(string $slug)
+    protected Registry $registry;
+
+    public function __construct(string $slug, Registry $registry)
     {
         $this->slug = $slug;
+        $this->registry = $registry;
     }
 
     public function title(string $title): self
@@ -29,7 +32,7 @@ class SettingsGroup
 
     public function page(string $title, \Closure $callback): self
     {
-        $page = new Page($title);
+        $page = new Page($title, $this->registry);
         $callback($page);
         $this->pages[] = $page;
         return $this;

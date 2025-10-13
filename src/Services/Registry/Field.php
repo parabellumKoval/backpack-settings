@@ -11,6 +11,9 @@ class Field
     public ?string $cast = null;
     public ?string $tab = null;
 
+    public bool $translatable = false;
+    public bool $regionable = false;
+
     public array $rules = [];
     public array $attributes = [];
 
@@ -39,6 +42,18 @@ class Field
     // сахар
     public function options(array $options): self { $this->props['options'] = $options; return $this; }
 
+    public function translatable(bool $translatable = true): self
+    {
+        $this->translatable = $translatable;
+        return $this;
+    }
+
+    public function regionable(bool $regionable = true): self
+    {
+        $this->regionable = $regionable;
+        return $this;
+    }
+
     // НОВОЕ
     public function aliases(array $aliases): self
     {
@@ -64,6 +79,8 @@ class Field
             'value'      => $value ?? $this->default,
             'attributes' => $this->attributes,
             'wrapper'    => ['class' => 'form-group col-sm-12'],
+            'is_translatable' => $this->translatable,
+            'is_regionable'   => $this->regionable,
         ];
         if ($this->tab) $arr['tab'] = $this->tab;
 
