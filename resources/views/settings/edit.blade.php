@@ -36,13 +36,13 @@
       @endif
 
       @php
-        $selectedLocale = old('locale', $currentLocale);
-        $selectedRegion = old('region', $currentRegion);
-        if (!in_array($selectedLocale, $availableLocales, true)) {
-          $selectedLocale = $currentLocale;
+        $selectedLocale = old('locale', $currentLocale ?? app()->getLocale());
+        $selectedRegion = old('region', $currentRegion ?? null);
+        if (!empty($availableLocales ?? []) && !in_array($selectedLocale, $availableLocales, true)) {
+          $selectedLocale = $currentLocale ?? app()->getLocale();
         }
-        if (!array_key_exists($selectedRegion, $regions ?? [])) {
-          $selectedRegion = $currentRegion;
+        if (!empty($regions ?? []) && !array_key_exists($selectedRegion, $regions)) {
+          $selectedRegion = $currentRegion ?? null;
         }
       @endphp
 
@@ -52,20 +52,24 @@
         <input type="hidden" name="region" value="{{ $selectedRegion }}">
 
         <div class="d-flex flex-wrap align-items-center mb-3">
-          @if ($hasTranslatable)
+          @if (!empty($hasTranslatable))
             @includeIf(backpack_view('inc.multilingual_language_switcher'), [
               'crud' => $crud,
               'currentLocale' => $selectedLocale,
-              'locales' => $availableLocales,
+              'locales' => $availableLocales ?? [],
             ])
           @endif
 
-          @if ($hasRegionable && !empty($regions))
+          @if (!empty($hasRegionable) && !empty($regions ?? []))
             <div class="ml-auto">
               <label for="settings-region" class="d-block mb-1">{{ __('Region') }}</label>
               <select id="settings-region" class="form-control" onchange="(function(select){
                 var url = new URL(window.location.href);
-                url.searchParams.set('region', select.value);
+                if (select.value) {
+                  url.searchParams.set('region', select.value);
+                } else {
+                  url.searchParams.delete('region');
+                }
                 url.searchParams.set('locale', '{{ $selectedLocale }}');
                 window.location = url.toString();
               })(this)">
@@ -121,7 +125,7 @@
 @endsection
 
 @section('after_scripts')
-  @if ($hasTranslatable)
+  @if (!empty($hasTranslatable))
     <script>
       document.addEventListener('DOMContentLoaded', function () {
         var links = document.querySelectorAll('a[href*="locale="]');
