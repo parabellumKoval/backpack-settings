@@ -5,7 +5,7 @@ use Backpack\Settings\Http\Controllers\Api\SettingsApiController;
 
 Route::group([
     'prefix'     => 'api/settings',
-    'middleware' => ['api'], // при необходимости: ['api','auth:api'] или sanctum
+    'middleware' => ['api', 'throttle:60,1'], // при необходимости: ['api','auth:api'] или sanctum
 ], function () {
     // Все записи из БД (простая выдача)
     Route::get('/', [SettingsApiController::class, 'db'])->name('backpack.settings.api.db');

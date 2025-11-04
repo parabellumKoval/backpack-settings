@@ -10,7 +10,7 @@ class Setting extends Model
     use CrudTrait;
     
     protected $table;
-    protected $fillable = ['key','value','cast','group','updated_by'];
+    protected $fillable = ['key','value','cast','group','region','locale','updated_by'];
 
     public function __construct(array $attributes = [])
     {

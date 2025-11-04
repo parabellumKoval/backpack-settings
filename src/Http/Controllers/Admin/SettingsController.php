@@ -2,29 +2,47 @@
 
 namespace Backpack\Settings\Http\Controllers\Admin;
 
-use Illuminate\Support\Arr;
 use Illuminate\Routing\Controller;
 use Backpack\Settings\Facades\Settings;
 use Illuminate\Http\Request;
 use Backpack\Settings\Facades\SettingsRegistry;
 use Backpack\Settings\Events\SettingsGroupChanged;
+use Illuminate\Support\Arr;
 
 
 class SettingsController extends Controller
 {
-    public function edit(string $groupSlug)
+    public function edit(Request $request, string $groupSlug)
     {
         $registry = SettingsRegistry::getFacadeRoot();
         $group = $registry->get($groupSlug);
         abort_if(!$group, 404);
+
+        $context = $this->resolveRequestContext($request);
+        $availableLocales = $this->availableLocales();
+        $availableRegions = $this->availableRegions();
+        $hasTranslatable = false;
+        $hasRegionable = false;
 
         // Build pages fields
         $pages = [];
         foreach ($group->pages as $page) {
             $fields = [];
             foreach ($page->fields as $f) {
-                $current = Settings::get($f->key, $f->default);
-                $fields[] = $f->toBackpackArray($current);
+                $fieldContext = $this->fieldContext($context, [
+                    'translatable' => $f->translatable,
+                    'regionable' => $f->regionable,
+                ]);
+                $current = Settings::get($f->key, $f->default, $fieldContext);
+                $fieldArr = $f->toBackpackArray($current);
+                $fields[] = $fieldArr;
+
+                if ($f->translatable) {
+                    $hasTranslatable = true;
+                }
+                if ($f->regionable) {
+                    $hasRegionable = true;
+                }
             }
             $pages[] = [
                 'title' => $page->title,
@@ -36,6 +54,14 @@ class SettingsController extends Controller
             'group' => $group,
             'pages' => $pages,
             'action' => route('backpack.settings.update', ['group' => $groupSlug]),
+            'currentLocale' => $context['locale'],
+            'currentRegion' => $context['region'],
+            'availableLocales' => $availableLocales,
+            'availableRegions' => $availableRegions,
+            'hasTranslatable' => $hasTranslatable,
+            'hasRegionable' => $hasRegionable,
+            'regionQueryParam' => config('backpack-settings.region_query_parameter', 'country'),
+            'localeQueryParam' => config('backpack-settings.locale_query_parameter', 'locale'),
         ]);
     }
 
@@ -45,16 +71,16 @@ class SettingsController extends Controller
         $group   = $this->resolveGroupOrFail($groupSlug);
         $fields  = $this->flattenFields($group);                   // [ ['key'=>..., 'type'=>..., 'cast'=>...], ... ]
         $payload = (array) $request->input('settings', []);
+        $context = $this->resolveRequestContext($request);
 
-        // dd($payload);
-        $before = $this->snapshotValues($fields, $groupSlug);      // ДО
+        $before = $this->snapshotValues($fields, $groupSlug, $context);      // ДО
 
-        $this->persistValues($fields, $payload, $groupSlug);       // ЗАПИСЬ
+        $this->persistValues($fields, $payload, $groupSlug, $context);       // ЗАПИСЬ
 
         // (опционально) если у тебя есть теговый кеш по группе — сброс:
         // Cache::tags(["settings:group:{$groupSlug}"])->flush();
 
-        $after = $this->snapshotValues($fields, $groupSlug);       // ПОСЛЕ
+        $after = $this->snapshotValues($fields, $groupSlug, $context);       // ПОСЛЕ
         $diff  = $this->computeDiff($before, $after);
 
         event(new SettingsGroupChanged($groupSlug, $before, $after, $diff));
@@ -88,6 +114,8 @@ class SettingsController extends Controller
                     'key'  => $f->key,
                     'type' => $f->type ?? null,
                     'cast' => $f->cast ?? null,
+                    'translatable' => $f->translatable ?? false,
+                    'regionable' => $f->regionable ?? false,
                 ];
             }
         }
@@ -99,14 +127,11 @@ class SettingsController extends Controller
      * @param array<int, array{key:string,type:?string,cast:?string}> $fields
      * @return array<string,mixed>
      */
-    protected function snapshotValues(array $fields, string $groupSlug): array
+    protected function snapshotValues(array $fields, string $groupSlug, array $context): array
     {
         $state = [];
         foreach ($fields as $f) {
-            $state[$f['key']] = \Settings::get($f['key'], null, [
-                'cast'  => $f['cast'],
-                'group' => $groupSlug,
-            ]);
+            $state[$f['key']] = \Settings::get($f['key'], null, $this->fieldContext($context, $f));
         }
         return $state;
     }
@@ -116,27 +141,84 @@ class SettingsController extends Controller
      * @param array<int, array{key:string,type:?string,cast:?string}> $fields
      * @param array<string,mixed> $payload
      */
-    protected function persistValues(array $fields, array $payload, string $groupSlug): void
+    protected function persistValues(array $fields, array $payload, string $groupSlug, array $context): void
     {
         foreach ($fields as $f) {
             $key  = $f['key'];
-            $type = $f['type'];
-            $cast = $f['cast'];
+            $type = $f['type'] ?? null;
+            $cast = $f['cast'] ?? null;
 
-            if (array_key_exists($key, $payload)) {
+             if (array_key_exists($key, $payload)) {
                 $value = $payload[$key];
                 if ($type === 'checkbox') {
                     $value = $value ? '1' : '0';
                 }
-                \Settings::set($key, $value, ['cast' => $cast, 'group' => $groupSlug]);
+                $meta = [
+                    'cast' => $cast,
+                    'group' => $groupSlug,
+                ] + $this->fieldContext($context, $f);
+
+                // if($key === 'profile.referrals.triggers.store.order_paid.levels')
+                //     dd($key, $value, $meta);
+                
+                \Settings::set($key, $value, $meta);
             } else {
                 // для неотмеченного чекбокса — сохранить '0'
                 if ($type === 'checkbox') {
-                    \Settings::set($key, '0', ['cast' => $cast, 'group' => $groupSlug]);
+                    $meta = [
+                        'cast' => $cast,
+                        'group' => $groupSlug,
+                    ] + $this->fieldContext($context, $f);
+                    \Settings::set($key, '0', $meta);
                 }
             }
+
         }
     }
+
+    /**
+     * Backpack repeatable field приходит строкой (json) или массивом.
+     * Нормализуем к массиву и удаляем полностью пустые строки.
+     *
+     * @param mixed $value
+     * @return array<int, array<string,mixed>>
+     */
+    // protected function normalizeRepeatableValue($value): array
+    // {
+    //     if ($value === null || $value === '') {
+    //         return [];
+    //     }
+
+    //     if (is_string($value)) {
+    //         $decoded = json_decode($value, true);
+    //         $value = json_last_error() === JSON_ERROR_NONE ? $decoded : [];
+    //     }
+
+    //     if (!is_array($value)) {
+    //         return [];
+    //     }
+
+    //     $filtered = [];
+    //     foreach ($value as $row) {
+    //         if (!is_array($row)) {
+    //             continue;
+    //         }
+
+    //         $hasData = false;
+    //         foreach ($row as $cell) {
+    //             if ($cell !== '' && $cell !== null) {
+    //                 $hasData = true;
+    //                 break;
+    //             }
+    //         }
+
+    //         if ($hasData) {
+    //             $filtered[] = $row;
+    //         }
+    //     }
+
+    //     return array_values($filtered);
+    // }
 
     /**
      * Запись значений из payload. Учитываем вложенные ключи (dot-notation),
@@ -207,6 +289,102 @@ class SettingsController extends Controller
     //         \Settings::set($key, $value, ['cast' => $cast, 'group' => $groupSlug]);
     //     }
     // }
+
+    protected function resolveRequestContext(Request $request): array
+    {
+        $localeParam = config('backpack-settings.locale_query_parameter', 'locale');
+        $regionParam = config('backpack-settings.region_query_parameter', 'country');
+
+        $locale = $request->query($localeParam);
+        if ($locale === null) {
+            $locale = $request->input($localeParam);
+        }
+
+        $region = $request->query($regionParam);
+        if ($region === null) {
+            $region = $request->input($regionParam);
+        }
+
+        return [
+            'locale' => $this->normalizeLocale($locale),
+            'region' => $this->normalizeRegion($region),
+        ];
+    }
+
+    protected function availableLocales(): array
+    {
+        $configured = config('backpack-settings.available_locales');
+        if ($configured === null) {
+            $configured = config('backpack.crud.locales', []);
+        }
+
+        if (empty($configured)) {
+            return [];
+        }
+
+        if (array_is_list($configured)) {
+            $configured = array_combine($configured, $configured);
+        }
+
+        $locales = [];
+        foreach ($configured as $code => $label) {
+            $normalized = $this->normalizeLocale($code);
+            if ($normalized === null) {
+                continue;
+            }
+            $locales[$normalized] = $label;
+        }
+
+        return $locales;
+    }
+
+    protected function availableRegions(): array
+    {
+        $regions = config('backpack-settings.available_regions', []);
+        if (empty($regions)) {
+            return [];
+        }
+
+        if (array_is_list($regions)) {
+            $regions = array_combine($regions, $regions);
+        }
+
+        $normalized = [];
+        foreach ($regions as $code => $label) {
+            $normCode = $this->normalizeRegion($code);
+            $normalized[$normCode ?? ''] = $label;
+        }
+
+        return $normalized;
+    }
+
+    protected function fieldContext(array $baseContext, array $fieldMeta): array
+    {
+        $context = [];
+        if (!empty($fieldMeta['regionable'])) {
+            $context['region'] = $baseContext['region'];
+        }
+        if (!empty($fieldMeta['translatable'])) {
+            $context['locale'] = $baseContext['locale'];
+        }
+        return $context;
+    }
+
+    protected function normalizeLocale($locale): ?string
+    {
+        if ($locale === null || $locale === '') {
+            return null;
+        }
+        return str_replace('_', '-', strtolower((string) $locale));
+    }
+
+    protected function normalizeRegion($region): ?string
+    {
+        if ($region === null || $region === '') {
+            return null;
+        }
+        return strtolower((string) $region);
+    }
 
     /**
      * Diff по ключам.

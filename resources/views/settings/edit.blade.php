@@ -37,6 +37,50 @@
 
       <form method="POST" action="{{ $action }}">
         @csrf
+        @if ($hasTranslatable)
+          <input type="hidden" name="{{ $localeQueryParam }}" value="{{ $currentLocale ?? '' }}">
+        @endif
+        @if ($hasRegionable)
+          <input type="hidden" name="{{ $regionQueryParam }}" value="{{ $currentRegion ?? '' }}">
+        @endif
+
+        @if (($hasTranslatable && !empty($availableLocales)) || ($hasRegionable && !empty($availableRegions)))
+          <div class="d-flex align-items-end flex-wrap mb-3">
+            @if ($hasTranslatable && !empty($availableLocales))
+              <div class="mr-3 mb-2">
+                <label for="settings-locale-select" class="form-label mb-1">{{ __('Язык') }}</label>
+                <select id="settings-locale-select"
+                        class="form-control"
+                        data-settings-context-select
+                        data-query-param="{{ $localeQueryParam }}">
+                  <option value="" {{ $currentLocale === null ? 'selected' : '' }}>{{ __('По умолчанию') }}</option>
+                  @foreach ($availableLocales as $code => $label)
+                    <option value="{{ $code }}" {{ $currentLocale === $code ? 'selected' : '' }}>
+                      {{ $label }}
+                    </option>
+                  @endforeach
+                </select>
+              </div>
+            @endif
+
+            @if ($hasRegionable && !empty($availableRegions))
+              <div class="mr-3 mb-2">
+                <label for="settings-region-select" class="form-label mb-1">{{ __('Регион') }}</label>
+                <select id="settings-region-select"
+                        class="form-control"
+                        data-settings-context-select
+                        data-query-param="{{ $regionQueryParam }}">
+                  <option value="" {{ $currentRegion === null ? 'selected' : '' }}>{{ __('Глобально') }}</option>
+                  @foreach ($availableRegions as $code => $label)
+                    <option value="{{ $code }}" {{ $currentRegion === $code ? 'selected' : '' }}>
+                      {{ $label }}
+                    </option>
+                  @endforeach
+                </select>
+              </div>
+            @endif
+          </div>
+        @endif
 
         <ul class="nav nav-tabs" role="tablist">
           @foreach ($pages as $i => $page)
@@ -56,12 +100,14 @@
           @endforeach
         </div>
 
+        <div hidden>
         <!-- load the view from the application if it exists, otherwise load the one in the package -->
         @if(view()->exists('vendor.backpack.crud.form_content'))
           @include('vendor.backpack.crud.form_content', ['fields' => $crud->fields(), 'action' => 'edit'])
         @else
           @include('crud::form_content', ['fields' => $crud->fields(), 'action' => 'edit'])
         @endif
+        </div>
 
         <div class="mt-3">
           <button type="submit" class="btn btn-success">
@@ -71,16 +117,9 @@
       </form>
     </div>
   </div>
-
-@section('after_styles')
-  <link rel="stylesheet" href="{{ asset('packages/backpack/crud/css/crud.css').'?v='.config('backpack.base.cachebusting_string') }}">
-  <link rel="stylesheet" href="{{ asset('packages/backpack/crud/css/form.css').'?v='.config('backpack.base.cachebusting_string') }}">
-  @stack('crud_fields_styles')
 @endsection
 
-@section('after_scripts')
-  @stack('crud_fields_scripts')
-
+@push('after_scripts')
   <script>
     (function () {
       function runBpInit(container) {
@@ -111,7 +150,71 @@
       } else {
         runBpInit(document);
       }
+
+      function attachContextSwitcher() {
+        var selects = document.querySelectorAll('[data-settings-context-select]');
+        if (!selects.length) return;
+
+        selects.forEach(function(select) {
+          select.addEventListener('change', function () {
+            var param = this.getAttribute('data-query-param');
+            if (!param) return;
+
+            var targetValue = this.value || '';
+            var hasModernApi = typeof window.URL === 'function' && typeof window.URLSearchParams === 'function';
+
+            if (hasModernApi) {
+              try {
+                var current = new window.URL(window.location.href);
+                if (targetValue) {
+                  current.searchParams.set(param, targetValue);
+                } else {
+                  current.searchParams.delete(param);
+                }
+                window.location.href = current.toString();
+                return;
+              } catch (e) {
+                // fallback below
+              }
+            }
+
+            var search = window.location.search ? window.location.search.substring(1) : '';
+            var pairs = search ? search.split('&') : [];
+            var params = {};
+
+            pairs.forEach(function (piece) {
+              if (!piece) return;
+              var parts = piece.split('=');
+              var key = decodeURIComponent(parts[0] || '');
+              if (!key) return;
+              var value = parts.length > 1 ? decodeURIComponent(parts[1]) : '';
+              params[key] = value;
+            });
+
+            if (targetValue) {
+              params[param] = targetValue;
+            } else {
+              delete params[param];
+            }
+
+            var newQuery = Object.keys(params).map(function (key) {
+              return encodeURIComponent(key) + '=' + encodeURIComponent(params[key]);
+            }).join('&');
+
+            var base = window.location.origin || (window.location.protocol + '//' + window.location.host);
+            var path = window.location.pathname || '';
+            var hash = window.location.hash || '';
+            var next = base + path + (newQuery ? '?' + newQuery : '') + hash;
+            window.location.href = next;
+          });
+        });
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', attachContextSwitcher);
+      } else {
+        attachContextSwitcher();
+      }
     })();
   </script>
-@endsection
-@endsection
+@endpush

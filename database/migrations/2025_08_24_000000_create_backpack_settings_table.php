@@ -13,9 +13,11 @@ return new class extends Migration {
             $table->text('value')->nullable();
             $table->string('cast')->nullable();
             $table->string('group')->nullable()->index();
+            $table->string('region', 32)->nullable()->index();
+            $table->string('locale', 32)->nullable()->index();
             $table->unsignedBigInteger('updated_by')->nullable();
             $table->timestamps();
-            $table->unique(['key'], 'bpsettings_key_unique');
+            $table->unique(['key', 'region', 'locale'], 'bpsettings_key_region_locale_unique');
         });
     }
 

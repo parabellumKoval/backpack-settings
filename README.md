@@ -97,6 +97,32 @@ Put blade views under `resources/views/vendor/backpack-settings/fields/yourtype.
 or ship them within this package's `resources/views/fields`.
 
 Then, in your registrar, use `Field::make('key', 'yourtype')`.
+
+## Locale & Region aware settings
+
+Settings can now be scoped by locale (language) and/or region.
+
+- Mark a field as locale-specific with `->translatable(true)`.
+- Mark a field as region-specific with `->regionable(true)`.
+- Combine both for values that depend on country and language.
+
+The admin UI shows switchers for the configured locales/regions, so editors can toggle between variations. Values are stored per combination and fall back automatically: `region + locale → region → locale → default`.
+
+Expose available options via `config/backpack-settings.php`:
+
+```php
+return [
+    'available_locales' => ['en' => 'English', 'ru' => 'Русский'],
+    'available_regions' => ['de' => 'Germany', 'pl' => 'Poland'],
+    'locale_query_parameter' => 'locale',
+    'region_query_parameter' => 'country',
+];
+```
+
+The public API endpoints automatically respect the context:
+
+- `GET /api/settings/nested?country=de` will prefer region-specific values.
+- The `Accept-Language` header (or explicit `?locale=`) drives the locale fallback chain.
 ```
 
 ## License

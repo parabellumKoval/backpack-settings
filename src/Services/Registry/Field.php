@@ -10,6 +10,8 @@ class Field
     public $default = null;
     public ?string $cast = null;
     public ?string $tab = null;
+    public bool $translatable = false;
+    public bool $regionable = false;
 
     public array $rules = [];
     public array $attributes = [];
@@ -35,6 +37,8 @@ class Field
     public function tab(?string $tab): self { $this->tab = $tab; return $this; }
     public function rules($rules): self { $this->rules = is_array($rules) ? $rules : [$rules]; return $this; }
     public function attrs(array $attrs): self { $this->attributes = $attrs + $this->attributes; return $this; }
+    public function translatable(bool $flag = true): self { $this->translatable = $flag; return $this; }
+    public function regionable(bool $flag = true): self { $this->regionable = $flag; return $this; }
 
     // сахар
     public function options(array $options): self { $this->props['options'] = $options; return $this; }
@@ -64,6 +68,8 @@ class Field
             'value'      => $value ?? $this->default,
             'attributes' => $this->attributes,
             'wrapper'    => ['class' => 'form-group col-sm-12'],
+            'translatable' => $this->translatable,
+            'regionable'   => $this->regionable,
         ];
         if ($this->tab) $arr['tab'] = $this->tab;
 

@@ -19,26 +19,26 @@ class SettingsManager
         $this->resolver = $resolver;
     }
 
-    public function get(string $key, $default = null)
+    public function get(string $key, $default = null, array $context = [])
     {
         $canon = $this->resolver->normalize($key);
+        $contextData = $this->resolveContext($context);
+        $variants = $contextData['variants'];
 
-        // Единый кэш для всех ключей (зарегистрированных и нет)
         if (config('backpack-settings.cache.enabled', true)) {
             $ttl = (int) config('backpack-settings.cache.ttl', 0);
-            $cacheKey = 'bp_settings:'.$canon;
+            $cacheKey = $this->buildCacheKey($canon, $variants);
+            $this->rememberCacheKey($canon, $cacheKey);
 
-            $resolver = function () use ($key, $canon, $default) {
+            $resolver = function () use ($key, $canon, $default, $contextData) {
                 $isRegistered = $this->resolver->isRegistered($canon);
                 if ($isRegistered) {
-                    return $this->resolveRegistered($key, $canon, $default);
+                    return $this->resolveRegistered($key, $canon, $default, $contextData);
                 }
-                // НОВОЕ: поддержка префикса для незарегистрированных
-                $aggregate = $this->fetchDbByPrefixAggregate([$canon]);
+                $aggregate = $this->fetchDbByPrefixAggregate([$canon], $contextData['variants']);
                 if (!empty($aggregate)) {
-                    return $aggregate; // массив по дочерним ключам из БД
+                    return $aggregate;
                 }
-                // как и раньше для незарегистрированных — только config()
                 return $this->resolveConfigOnly($key, $canon, $default);
             };
 
@@ -47,53 +47,47 @@ class SettingsManager
                 : $this->cache->rememberForever($cacheKey, $resolver);
         }
 
-        // Без кэша
         $isRegistered = $this->resolver->isRegistered($canon);
         if ($isRegistered) {
-            return $this->resolveRegistered($key, $canon, $default);
+            return $this->resolveRegistered($key, $canon, $default, $contextData);
         }
-        $aggregate = $this->fetchDbByPrefixAggregate([$canon]);
-        if (!empty($aggregate)) return $aggregate;
+        $aggregate = $this->fetchDbByPrefixAggregate([$canon], $contextData['variants']);
+        if (!empty($aggregate)) {
+            return $aggregate;
+        }
         return $this->resolveConfigOnly($key, $canon, $default);
     }
 
-    protected function resolveRegistered(string $original, string $canon, $default)
+    protected function resolveRegistered(string $original, string $canon, $default, array $contextData)
     {
         $aliases = $this->resolver->aliasesFor($canon);
+        $variants = $contextData['variants'];
 
-        // 2) DB: канон → алиасы → исходный
         $dbKeys = array_values(array_unique(array_merge([$canon], $aliases, [$original])));
         foreach ($this->prioritizedDrivers() as $driver) {
             if ($driver instanceof \Backpack\Settings\Drivers\DatabaseDriver) {
                 foreach ($dbKeys as $k) {
-                    if ($driver->has($k)) {
-                        $raw = $driver->get($k);
-                        // cast из БД
-                        $db = app('db'); $table = config('backpack-settings.table');
-                        $row = $db->table($table)->where('key', $k)->first(['cast']);
-                        $cast = $row->cast ?? null;
-                        return $this->castOut($raw, $cast);
+                    $row = $this->findDbRow($k, $variants);
+                    if ($row !== null) {
+                        return $this->castOut($row['value'], $row['cast']);
                     }
                 }
 
-                $aggregate = $this->fetchDbByPrefixAggregate($dbKeys);
+                $aggregate = $this->fetchDbByPrefixAggregate($dbKeys, $variants);
                 if (!empty($aggregate)) {
-                    return $aggregate; // массив типа ['enabled'=>..., 'type'=>...]
+                    return $aggregate;
                 }
-                break; // DB проверили — выходим
+                break;
             }
         }
 
-        // 3) config() по алиасам
         foreach ($aliases as $a) {
             if (config()->has($a)) return config($a);
         }
-        // (на всякий случай) если original — не в списке алиасов
         if (!in_array($original, $aliases, true) && $original !== $canon && config()->has($original)) {
             return config($original);
         }
 
-        // 4) config() по канону
         if (config()->has($canon)) return config($canon);
 
         return $default;
@@ -134,24 +128,31 @@ class SettingsManager
 
         $cast = $meta['cast'] ?? null;
         $group = $meta['group'] ?? null;
+        $contextMeta = $this->normalizeMutationContext($meta);
 
         foreach ($this->prioritizedDrivers() as $driver) {
             if ($driver instanceof \Backpack\Settings\Drivers\DatabaseDriver) {
-                $driver->set($canon, $this->castIn($value, $cast), $cast, $group);
+                $driver->set($canon, $this->castIn($value, $cast), [
+                    'cast' => $cast,
+                    'group' => $group,
+                    'region' => $contextMeta['region'],
+                    'locale' => $contextMeta['locale'],
+                ]);
                 break;
             }
         }
 
-        // Инвалидация кэша по канону
-        $this->cache->forget('bp_settings:'.$canon);
-        if ($canon !== $key) $this->cache->forget('bp_settings:'.$key);
+        $this->forgetCacheKeys($canon);
+        if ($canon !== $key) {
+            $this->forgetCacheKeys($key);
+        }
 
         // Инвалидируем агрегаты всех предков "a", "a.b", "a.b.c", ...
         $parts = explode('.', $canon);
         $prefix = '';
         foreach ($parts as $i => $p) {
             $prefix = $prefix ? ($prefix.'.'.$p) : $p;
-            $this->cache->forget('bp_settings:'.$prefix);
+            $this->forgetCacheKeys($prefix);
         }
     }
 
@@ -166,16 +167,16 @@ class SettingsManager
         return $ordered;
     }
 
-    public function has(string $key): bool
+    public function has(string $key, array $context = []): bool
     {
-        return $this->get($key, '__MISSING__') !== '__MISSING__';
+        return $this->get($key, '__MISSING__', $context) !== '__MISSING__';
     }
 
-    public function many(array $keys): array
+    public function many(array $keys, array $context = []): array
     {
         $result = [];
         foreach ($keys as $key) {
-            $result[$key] = $this->get($key);
+            $result[$key] = $this->get($key, null, $context);
         }
         return $result;
     }
@@ -225,86 +226,316 @@ class SettingsManager
         }
     }
 
-    protected function getDbRow(string $key): array
+    protected function findDbRow(string $key, array $variants): ?array
     {
         $table = config('backpack-settings.table', 'backpack_settings');
-        $row = app('db')->table($table)->where('key', $key)->first(['value','cast']);
-        return ['value' => $row->value ?? null, 'cast' => $row->cast ?? null];
+        foreach ($variants as $variant) {
+            $query = app('db')->table($table)->where('key', $key);
+
+            if (array_key_exists('region', $variant)) {
+                $variant['region'] === null
+                    ? $query->whereNull('region')
+                    : $query->where('region', $variant['region']);
+            }
+
+            if (array_key_exists('locale', $variant)) {
+                $variant['locale'] === null
+                    ? $query->whereNull('locale')
+                    : $query->where('locale', $variant['locale']);
+            }
+
+            $row = $query->first(['value', 'cast']);
+            if ($row) {
+                return ['value' => $row->value, 'cast' => $row->cast];
+            }
+        }
+
+        return null;
     }
 
-    /**
-     * Ищет все записи с префиксом среди кандидатов (канон/алиасы/оригинал),
-     * возвращает ассоциативный массив относительно "корня" префикса, только первый уровень.
-     *
-     * Пример:
-     *  prefix=profile.referrals.triggers.review.published
-     *  keys в БД:
-     *    profile.referrals.triggers.review.published.enabled => 1
-     *    profile.referrals.triggers.review.published.type    => "auto"
-     *    profile.referrals.triggers.review.published.meta.x  => "y"
-     *  вернёт:
-     *    ['enabled'=>true,'type'=>'auto','meta'=>['x'=>'y']]  // (можно и «плоско», см. заметку ниже)
-     */
-    protected function fetchDbByPrefixAggregate(array $candidatePrefixes)
+    protected function fetchDbByPrefixAggregate(array $candidatePrefixes, array $variants)
     {
-        $table = config('backpack-settings.table', 'backpack_settings');
+        $rowsByKey = [];
 
-        // соберём LIKE условия по всем кандидатам, чтобы покрыть и канон, и алиасы, и оригинал
-        $query = app('db')->table($table)->select(['key','value','cast']);
-        $query->where(function($q) use ($candidatePrefixes) {
-            foreach ($candidatePrefixes as $i => $pref) {
-                $q->orWhere('key', 'like', $pref . '.%');
+        foreach ($variants as $variant) {
+            $rows = $this->queryVariantRows($candidatePrefixes, $variant);
+            if ($rows->isEmpty()) {
+                continue;
             }
-        });
 
-        $rows = $query->get();
-        if ($rows->isEmpty()) return [];
+            foreach ($rows as $row) {
+                if (!isset($rowsByKey[$row->key])) {
+                    $rowsByKey[$row->key] = $row;
+                }
+            }
+        }
 
-        // Определим, по какому из кандидатов строить относительные хвосты:
-        // выбираем самый длинный префикс, который действительно встретился в результатах
+        if (empty($rowsByKey)) {
+            return [];
+        }
+
         $matchedPrefix = null;
         foreach ($candidatePrefixes as $pref) {
-            foreach ($rows as $r) {
-                if (strpos($r->key, $pref . '.') === 0) {
-                    // берём самый длинный из совпавших
+            foreach ($rowsByKey as $key => $row) {
+                if (strpos($key, $pref . '.') === 0) {
                     if ($matchedPrefix === null || strlen($pref) > strlen($matchedPrefix)) {
                         $matchedPrefix = $pref;
                     }
                 }
             }
         }
-        if ($matchedPrefix === null) return [];
 
-        // Собираем дерево по первому уровню (enabled => ..., type => ..., meta => [...])
+        if ($matchedPrefix === null) {
+            return [];
+        }
+
         $result = [];
-        foreach ($rows as $r) {
-            $suffix = substr($r->key, strlen($matchedPrefix) + 1); // отрезаем "prefix."
-            if ($suffix === '' || $suffix === false) continue;
+        foreach ($rowsByKey as $key => $row) {
+            $suffix = substr($key, strlen($matchedPrefix) + 1);
+            if ($suffix === '' || $suffix === false) {
+                continue;
+            }
 
-            // если есть вложенность дальше "a.b.c" — положим в подмассив (один проход)
+            $casted = $this->castOut($row->value, $row->cast ?? null);
+
             if (strpos($suffix, '.') !== false) {
                 [$head, $tail] = explode('.', $suffix, 2);
-                // простая вложенность: meta['x'] = ...
                 if (!isset($result[$head]) || !is_array($result[$head])) {
                     $result[$head] = [];
                 }
-                // только один уровень расслаивания; глубже можно оставить плоским ключом
-                if (strpos($tail, '.') === false) {
-                    // tail like "x"
-                    $casted = $this->castOut($r->value, $r->cast ?? null);
-                    $result[$head][$tail] = $casted;
-                } else {
-                    // tail like "x.y" — можно сохранить как строку ключа "x.y"
-                    $casted = $this->castOut($r->value, $r->cast ?? null);
-                    $result[$head][$tail] = $casted;
-                }
+                $result[$head][$tail] = $casted;
             } else {
-                // простой ключ "enabled"
-                $casted = $this->castOut($r->value, $r->cast ?? null);
                 $result[$suffix] = $casted;
             }
         }
 
         return $result;
+    }
+
+    protected function queryVariantRows(array $candidatePrefixes, array $variant)
+    {
+        $table = config('backpack-settings.table', 'backpack_settings');
+        $query = app('db')->table($table)->select(['key', 'value', 'cast']);
+
+        $query->where(function ($q) use ($candidatePrefixes) {
+            foreach ($candidatePrefixes as $pref) {
+                $q->orWhere('key', 'like', $pref . '.%');
+            }
+        });
+
+        if (array_key_exists('region', $variant)) {
+            $variant['region'] === null
+                ? $query->whereNull('region')
+                : $query->where('region', $variant['region']);
+        }
+
+        if (array_key_exists('locale', $variant)) {
+            $variant['locale'] === null
+                ? $query->whereNull('locale')
+                : $query->where('locale', $variant['locale']);
+        }
+
+        return $query->get();
+    }
+
+    protected function buildCacheKey(string $canon, array $variants): string
+    {
+        return 'bp_settings:' . $canon . ':' . md5(json_encode($variants));
+    }
+
+    protected function rememberCacheKey(string $identifier, string $cacheKey): void
+    {
+        $mapKey = $this->cacheNamespaceKey($identifier);
+        $known = $this->cache->get($mapKey, []);
+        if (!in_array($cacheKey, $known, true)) {
+            $known[] = $cacheKey;
+            $this->cache->forever($mapKey, $known);
+        }
+    }
+
+    protected function forgetCacheKeys(string $identifier): void
+    {
+        $mapKey = $this->cacheNamespaceKey($identifier);
+        $keys = $this->cache->get($mapKey, []);
+        foreach ($keys as $key) {
+            $this->cache->forget($key);
+        }
+        $this->cache->forget($mapKey);
+    }
+
+    protected function cacheNamespaceKey(string $identifier): string
+    {
+        return 'bp_settings:context_map:' . $identifier;
+    }
+
+    protected function resolveContext(array $context): array
+    {
+        $region = $this->normalizeRegion($context['region'] ?? ($context['country'] ?? null));
+        $variants = $this->variantsFromRegionAndLocales($region, $this->localeCandidates($context));
+
+        return [
+            'variants' => $variants,
+        ];
+    }
+
+    protected function normalizeMutationContext(array $meta): array
+    {
+        return [
+            'region' => $this->normalizeRegion($meta['region'] ?? ($meta['country'] ?? null)),
+            'locale' => $this->normalizeLocale($meta['locale'] ?? ($meta['language'] ?? null)),
+        ];
+    }
+
+    protected function normalizeRegion($region): ?string
+    {
+        if ($region === null || $region === '') {
+            return null;
+        }
+        return strtolower((string) $region);
+    }
+
+    protected function normalizeLocale($locale): ?string
+    {
+        if ($locale === null || $locale === '') {
+            return null;
+        }
+        $normalized = str_replace('_', '-', strtolower((string) $locale));
+        return $normalized;
+    }
+
+    protected function availableLocales(): array
+    {
+        $configured = config('backpack-settings.available_locales');
+        if ($configured !== null) {
+            $list = array_is_list($configured) ? $configured : array_keys((array) $configured);
+            $normalized = array_filter(array_map(fn ($locale) => $this->normalizeLocale($locale), $list));
+            return array_values(array_unique($normalized));
+        }
+
+        $crudLocales = array_keys(config('backpack.crud.locales', []));
+        if (!empty($crudLocales)) {
+            $normalized = array_filter(array_map(fn ($locale) => $this->normalizeLocale($locale), $crudLocales));
+            return array_values(array_unique($normalized));
+        }
+
+        return [];
+    }
+
+    protected function localeCandidates(array $context): array
+    {
+        $candidates = [];
+        $explicit = $this->normalizeLocale($context['locale'] ?? ($context['language'] ?? null));
+        if ($explicit) {
+            $candidates[] = $explicit;
+        }
+
+        $acceptHeader = $context['accept_language'] ?? $context['accept-language'] ?? null;
+        foreach ($this->parseAcceptLanguage($acceptHeader) as $locale) {
+            $normalized = $this->normalizeLocale($locale);
+            if ($normalized) {
+                $candidates[] = $normalized;
+                if (str_contains($normalized, '-')) {
+                    $base = explode('-', $normalized)[0];
+                    $candidates[] = $base;
+                }
+            }
+        }
+
+        if (config('backpack-settings.auto_locale', true)) {
+            $appLocale = $this->normalizeLocale(app()->getLocale());
+            if ($appLocale) {
+                $candidates[] = $appLocale;
+            }
+        }
+
+        $available = $this->availableLocales();
+        if (!empty($available)) {
+            $candidates = array_filter($candidates, function ($locale) use ($available) {
+                return in_array($locale, $available, true);
+            });
+        }
+
+        $unique = [];
+        $ordered = [];
+        foreach ($candidates as $candidate) {
+            if ($candidate === null) {
+                continue;
+            }
+            if (!isset($unique[$candidate])) {
+                $unique[$candidate] = true;
+                $ordered[] = $candidate;
+            }
+        }
+
+        $ordered[] = null;
+
+        return $ordered;
+    }
+
+    protected function parseAcceptLanguage(?string $header): array
+    {
+        if (!$header) {
+            return [];
+        }
+
+        $segments = array_map('trim', explode(',', $header));
+        $locales = [];
+
+        foreach ($segments as $segment) {
+            if ($segment === '') {
+                continue;
+            }
+
+            $locale = $segment;
+            $quality = 1.0;
+
+            if (strpos($segment, ';') !== false) {
+                [$locale, $rest] = explode(';', $segment, 2);
+                $locale = trim($locale);
+                $quality = 1.0;
+                if (preg_match('/q=([0-9.]+)/', $rest, $matches)) {
+                    $quality = (float) $matches[1];
+                }
+            }
+
+            $locales[] = ['locale' => $locale, 'q' => $quality];
+        }
+
+        usort($locales, function ($a, $b) {
+            if ($a['q'] === $b['q']) {
+                return 0;
+            }
+            return $a['q'] < $b['q'] ? 1 : -1;
+        });
+
+        return array_column($locales, 'locale');
+    }
+
+    protected function variantsFromRegionAndLocales(?string $region, array $locales): array
+    {
+        $regions = [];
+        if ($region !== null) {
+            $regions[] = $region;
+        }
+        $regions[] = null;
+
+        $variants = [];
+        foreach ($regions as $reg) {
+            foreach ($locales as $locale) {
+                $variants[] = ['region' => $reg, 'locale' => $locale];
+            }
+        }
+
+        $unique = [];
+        $ordered = [];
+        foreach ($variants as $variant) {
+            $key = ($variant['region'] ?? '__null__') . '|' . ($variant['locale'] ?? '__null__');
+            if (!isset($unique[$key])) {
+                $unique[$key] = true;
+                $ordered[] = $variant;
+            }
+        }
+
+        return $ordered;
     }
 }
