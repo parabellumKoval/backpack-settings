@@ -58,6 +58,14 @@ class DatabaseDriver implements SettingsDriver
         }
     }
 
+    public function delete(string $key, array $context = []): void
+    {
+        $ctx = $this->normalizeContext($context);
+        $query = $this->db->table($this->table)->where('key', $key);
+        $this->applyContext($query, $ctx);
+        $query->delete();
+    }
+
     public function getByPrefix(string $prefix, array $context = []): array
     {
         // ожидаем $prefix без завершающей точки

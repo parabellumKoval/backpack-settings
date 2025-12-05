@@ -41,7 +41,7 @@
           <input type="hidden" name="{{ $localeQueryParam }}" value="{{ $currentLocale ?? '' }}">
         @endif
         @if ($hasRegionable)
-          <input type="hidden" name="{{ $regionQueryParam }}" value="{{ $currentRegion ?? '' }}">
+          <input type="hidden" name="{{ $regionQueryParam }}" value="{{ $selectedRegionValue ?? '' }}">
         @endif
 
         @if (($hasTranslatable && !empty($availableLocales)) || ($hasRegionable && !empty($availableRegions)))
@@ -70,15 +70,24 @@
                         class="form-control"
                         data-settings-context-select
                         data-query-param="{{ $regionQueryParam }}">
-                  <option value="" {{ $currentRegion === null ? 'selected' : '' }}>{{ __('Глобально') }}</option>
+                  <option value="" {{ ($selectedRegionValue ?? '') === '' ? 'selected' : '' }}>{{ __('Глобально') }}</option>
+                  <option value="{{ $regionAllValue }}" {{ ($selectedRegionValue ?? '') === $regionAllValue ? 'selected' : '' }}>
+                    {{ __('Все регионы') }}
+                  </option>
                   @foreach ($availableRegions as $code => $label)
-                    <option value="{{ $code }}" {{ $currentRegion === $code ? 'selected' : '' }}>
+                    <option value="{{ $code }}" {{ ($selectedRegionValue ?? '') === $code ? 'selected' : '' }}>
                       {{ $label }}
                     </option>
                   @endforeach
                 </select>
               </div>
             @endif
+          </div>
+        @endif
+
+        @if ($regionMode === 'all')
+          <div class="alert alert-warning mb-3">
+            {{ __('Значения будут применены ко всем регионам. Локальные переопределения будут перезаписаны.') }}
           </div>
         @endif
 
@@ -119,17 +128,80 @@
   </div>
 @endsection
 
+@push('after_styles')
+  <style>
+    .settings-field-indicators {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      margin-left: 6px;
+    }
+    .settings-field-indicator {
+      font-size: 0.9em;
+      color: #6c757d;
+    }
+  </style>
+@endpush
+
 @push('after_scripts')
   <script>
     (function () {
+      function decorateFieldIndicators(root) {
+        var scope = root || document;
+        if (!scope.querySelectorAll) return;
+        var wrappers = scope.querySelectorAll('[data-field-translatable], [data-field-regionable]');
+        if (!wrappers.length) return;
+
+        wrappers.forEach(function (wrapper) {
+          if (wrapper.getAttribute('data-field-indicators-ready') === '1') {
+            return;
+          }
+          var label = wrapper.querySelector('label');
+          if (!label) {
+            wrapper.setAttribute('data-field-indicators-ready', '1');
+            return;
+          }
+
+          var container = document.createElement('span');
+          container.className = 'settings-field-indicators text-muted';
+          var hasIcons = false;
+
+          if (wrapper.hasAttribute('data-field-translatable')) {
+            var translateIcon = document.createElement('i');
+            translateIcon.className = 'la la-flag settings-field-indicator';
+            translateIcon.title = 'Поле переводимое';
+            container.appendChild(translateIcon);
+            hasIcons = true;
+          }
+
+          if (wrapper.hasAttribute('data-field-regionable')) {
+            var regionIcon = document.createElement('i');
+            regionIcon.className = 'la la-globe settings-field-indicator';
+            regionIcon.title = 'Поле зависит от региона';
+            container.appendChild(regionIcon);
+            hasIcons = true;
+          }
+
+          if (hasIcons) {
+            label.appendChild(container);
+          }
+
+          wrapper.setAttribute('data-field-indicators-ready', '1');
+        });
+      }
+
       function runBpInit(container) {
         container = container || document;
         var $ = window.jQuery || window.$;
-        if (!$) return;
+        if (!$) {
+          decorateFieldIndicators(container);
+          return;
+        }
 
         // Если есть Backpack-овский helper — используем его
         if (window.crud && typeof window.crud.initFieldsWithJavascript === 'function') {
           window.crud.initFieldsWithJavascript(container);
+          decorateFieldIndicators(container);
           return;
         }
 
@@ -142,6 +214,8 @@
             fn($el);
           }
         });
+
+        decorateFieldIndicators(container);
       }
 
       // init после загрузки

@@ -28,4 +28,9 @@ class ConfigDriver implements SettingsDriver
     {
         // Config is read-only; do nothing.
     }
+
+    public function delete(string $key, array $context = []): void
+    {
+        // Read-only config cannot be modified.
+    }
 }

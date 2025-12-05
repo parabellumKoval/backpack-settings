@@ -73,6 +73,13 @@ class Field
         ];
         if ($this->tab) $arr['tab'] = $this->tab;
 
+        if ($this->translatable) {
+            $arr['wrapper']['data-field-translatable'] = '1';
+        }
+        if ($this->regionable) {
+            $arr['wrapper']['data-field-regionable'] = '1';
+        }
+
         foreach ($this->props as $k => $v) {
             if ($k === 'wrapper' && is_array($v)) {
                 $arr['wrapper'] = $v + $arr['wrapper'];

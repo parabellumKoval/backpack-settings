@@ -28,12 +28,33 @@ class SettingsApiController extends Controller
 
         $keys = $q->pluck('key')->unique()->toArray();
         $context = $this->resolveContext($request);
+        
+        // Debug: тестируем конкретный ключ shipping.methods
+        $testKey = 'shipping.methods';
+        $testValue = Settings::get($testKey, 'DEFAULT_VALUE', $context);
+        
+        // Debug: добавляем информацию о контексте в ответ
+        $debug = [
+            'context' => $context,
+            'headers' => [
+                'X-Region' => $request->header('X-Region'),
+                'X-Country' => $request->header('X-Country'),
+                'X-Locale' => $request->header('X-Locale'),
+                'X-Language' => $request->header('X-Language'),
+                'Accept-Language' => $request->header('Accept-Language'),
+            ],
+            'test_shipping_methods' => $testValue
+        ];
+        
         $data = [];
         foreach ($keys as $key) {
             $data[$key] = Settings::get($key, null, $context);
         }
 
-        return response()->json($data);
+        return response()->json([
+            'data' => $data,
+            'debug' => $debug
+        ]);
     }
 
     /**
@@ -90,11 +111,22 @@ class SettingsApiController extends Controller
         $localeParam = config('backpack-settings.locale_query_parameter', 'locale');
         $regionParam = config('backpack-settings.region_query_parameter', 'country');
 
+        // Получаем регион из query параметра, заголовка X-Region, или заголовка X-Country
+        $region = $request->query($regionParam) 
+               ?? $request->header('X-Region') 
+               ?? $request->header('X-Country');
+
+        // Получаем локаль из различных источников с приоритетом
+        $locale = $request->query($localeParam) 
+               ?? $request->header('X-Locale') 
+               ?? $request->header('X-Language');
+
         $context = [
-            'locale' => $this->normalizeLocale($request->query($localeParam)),
-            'region' => $this->normalizeRegion($request->query($regionParam)),
+            'locale' => $this->normalizeLocale($locale),
+            'region' => $this->normalizeRegion($region),
         ];
 
+        // Добавляем Accept-Language заголовок для дальнейшей обработки в SettingsManager
         $acceptLanguage = $request->header('Accept-Language');
         if ($acceptLanguage) {
             $context['accept_language'] = $acceptLanguage;

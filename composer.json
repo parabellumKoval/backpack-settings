@@ -1,5 +1,6 @@
 {
   "name": "parabellumkoval/backpack-settings",
+  "version": "dev-main",
   "description": "Settings UI & Service for Laravel 8 + Backpack 4.1 (config/DB drivers, tabs, registry, aliases).",
   "type": "library",
   "license": "MIT",

@@ -12,6 +12,8 @@ use Illuminate\Support\Arr;
 
 class SettingsController extends Controller
 {
+    protected const REGION_APPLY_ALL_VALUE = '__all__';
+
     public function edit(Request $request, string $groupSlug)
     {
         $registry = SettingsRegistry::getFacadeRoot();
@@ -56,12 +58,15 @@ class SettingsController extends Controller
             'action' => route('backpack.settings.update', ['group' => $groupSlug]),
             'currentLocale' => $context['locale'],
             'currentRegion' => $context['region'],
+            'selectedRegionValue' => $context['region_selector_value'] ?? '',
             'availableLocales' => $availableLocales,
             'availableRegions' => $availableRegions,
             'hasTranslatable' => $hasTranslatable,
             'hasRegionable' => $hasRegionable,
+            'regionMode' => $context['region_mode'] ?? 'single',
             'regionQueryParam' => config('backpack-settings.region_query_parameter', 'country'),
             'localeQueryParam' => config('backpack-settings.locale_query_parameter', 'locale'),
+            'regionAllValue' => self::REGION_APPLY_ALL_VALUE,
         ]);
     }
 
@@ -143,6 +148,9 @@ class SettingsController extends Controller
      */
     protected function persistValues(array $fields, array $payload, string $groupSlug, array $context): void
     {
+        $applyAllRegions = (($context['region_mode'] ?? null) === 'all');
+        $broadcastRegions = $applyAllRegions ? $this->regionTargetsForApplyAll() : [];
+
         foreach ($fields as $f) {
             $key  = $f['key'];
             $type = $f['type'] ?? null;
@@ -158,10 +166,16 @@ class SettingsController extends Controller
                     'group' => $groupSlug,
                 ] + $this->fieldContext($context, $f);
 
-                // if($key === 'profile.referrals.triggers.store.order_paid.levels')
-                //     dd($key, $value, $meta);
-                
-                \Settings::set($key, $value, $meta);
+                $shouldDelete = $this->isPayloadValueEmpty($value);
+                $this->persistFieldMutation(
+                    $key,
+                    $value,
+                    $meta,
+                    $shouldDelete,
+                    $applyAllRegions,
+                    !empty($f['regionable']),
+                    $broadcastRegions
+                );
             } else {
                 // для неотмеченного чекбокса — сохранить '0'
                 if ($type === 'checkbox') {
@@ -169,7 +183,16 @@ class SettingsController extends Controller
                         'cast' => $cast,
                         'group' => $groupSlug,
                     ] + $this->fieldContext($context, $f);
-                    \Settings::set($key, '0', $meta);
+
+                    $this->persistFieldMutation(
+                        $key,
+                        '0',
+                        $meta,
+                        false,
+                        $applyAllRegions,
+                        !empty($f['regionable']),
+                        $broadcastRegions
+                    );
                 }
             }
 
@@ -305,9 +328,27 @@ class SettingsController extends Controller
             $region = $request->input($regionParam);
         }
 
+        $regionMode = 'single';
+        $regionSelectorValue = $region ?? '';
+        $normalizedRegion = null;
+        if ($region === self::REGION_APPLY_ALL_VALUE) {
+            $regionMode = 'all';
+            $regionSelectorValue = self::REGION_APPLY_ALL_VALUE;
+        } else {
+            if ($region === null || $region === '') {
+                $regionMode = 'global';
+                $regionSelectorValue = '';
+            } else {
+                $normalizedRegion = $this->normalizeRegion($region);
+                $regionSelectorValue = $normalizedRegion ?? '';
+            }
+        }
+
         return [
             'locale' => $this->normalizeLocale($locale),
-            'region' => $this->normalizeRegion($region),
+            'region' => $normalizedRegion,
+            'region_selector_value' => $regionSelectorValue,
+            'region_mode' => $regionMode,
         ];
     }
 
@@ -358,6 +399,27 @@ class SettingsController extends Controller
         return $normalized;
     }
 
+    protected function regionTargetsForApplyAll(): array
+    {
+        $regionLabels = $this->availableRegions();
+        $codes = array_filter(array_keys($regionLabels), function ($code) {
+            return $code !== '';
+        });
+        $codes[] = null;
+
+        $unique = [];
+        $targets = [];
+        foreach ($codes as $code) {
+            $key = $code === null ? '__null__' : $code;
+            if (!isset($unique[$key])) {
+                $unique[$key] = true;
+                $targets[] = $code;
+            }
+        }
+
+        return $targets;
+    }
+
     protected function fieldContext(array $baseContext, array $fieldMeta): array
     {
         $context = [];
@@ -368,6 +430,50 @@ class SettingsController extends Controller
             $context['locale'] = $baseContext['locale'];
         }
         return $context;
+    }
+
+    protected function applyAcrossRegions(callable $callback, array $meta, bool $applyAllRegions, bool $isRegionable, array $targets): void
+    {
+        if ($applyAllRegions && $isRegionable) {
+            foreach ($targets as $regionCode) {
+                $regionalMeta = $meta;
+                $regionalMeta['region'] = $regionCode;
+                $callback($regionalMeta);
+            }
+            return;
+        }
+
+        $callback($meta);
+    }
+
+    protected function persistFieldMutation(string $key, $value, array $meta, bool $delete, bool $applyAllRegions, bool $isRegionable, array $targets): void
+    {
+        $this->applyAcrossRegions(function ($regionalMeta) use ($key, $value, $delete) {
+            if ($delete) {
+                \Settings::forget($key, $regionalMeta);
+            } else {
+                \Settings::set($key, $value, $regionalMeta);
+            }
+        }, $meta, $applyAllRegions, $isRegionable, $targets);
+    }
+
+    protected function isPayloadValueEmpty($value): bool
+    {
+        if ($value === null) {
+            return true;
+        }
+        if (is_string($value)) {
+            return trim($value) === '';
+        }
+        if (is_array($value)) {
+            foreach ($value as $item) {
+                if (!$this->isPayloadValueEmpty($item)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        return false;
     }
 
     protected function normalizeLocale($locale): ?string

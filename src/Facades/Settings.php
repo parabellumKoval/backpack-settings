@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Facade;
  * @method static bool has(string $key, array $context = [])
  * @method static array many(array $keys, array $context = [])
  * @method static void set(string $key, $value, array $meta = [])
+ * @method static void forget(string $key, array $meta = [])
  */
 class Settings extends Facade
 {

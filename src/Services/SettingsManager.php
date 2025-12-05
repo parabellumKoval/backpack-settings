@@ -156,6 +156,38 @@ class SettingsManager
         }
     }
 
+    public function forget(string $key, array $meta = []): void
+    {
+        $canon = $this->resolver->normalize($key);
+        if (!$this->resolver->isRegistered($canon)) {
+            return;
+        }
+
+        $contextMeta = $this->normalizeMutationContext($meta);
+
+        foreach ($this->prioritizedDrivers() as $driver) {
+            if (method_exists($driver, 'delete')) {
+                $driver->delete($canon, [
+                    'group' => $meta['group'] ?? null,
+                    'region' => $contextMeta['region'],
+                    'locale' => $contextMeta['locale'],
+                ]);
+            }
+        }
+
+        $this->forgetCacheKeys($canon);
+        if ($canon !== $key) {
+            $this->forgetCacheKeys($key);
+        }
+
+        $parts = explode('.', $canon);
+        $prefix = '';
+        foreach ($parts as $p) {
+            $prefix = $prefix ? ($prefix.'.'.$p) : $p;
+            $this->forgetCacheKeys($prefix);
+        }
+    }
+
     protected function prioritizedDrivers(): array
     {
         $ordered = [];
