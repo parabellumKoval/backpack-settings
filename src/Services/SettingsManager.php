@@ -372,7 +372,8 @@ class SettingsManager
 
     protected function buildCacheKey(string $canon, array $variants): string
     {
-        return 'bp_settings:' . $canon . ':' . md5(json_encode($variants));
+        $version = $this->currentCacheVersion($canon);
+        return 'bp_settings:' . $canon . ':' . $version . ':' . md5(json_encode($variants));
     }
 
     protected function rememberCacheKey(string $identifier, string $cacheKey): void
@@ -393,11 +394,45 @@ class SettingsManager
             $this->cache->forget($key);
         }
         $this->cache->forget($mapKey);
+        $this->bumpCacheVersion($identifier);
     }
 
     protected function cacheNamespaceKey(string $identifier): string
     {
         return 'bp_settings:context_map:' . $identifier;
+    }
+
+    protected function cacheVersionKey(string $identifier): string
+    {
+        return 'bp_settings:version:' . $identifier;
+    }
+
+    protected function currentCacheVersion(string $identifier): string
+    {
+        $versionKey = $this->cacheVersionKey($identifier);
+        $version = $this->cache->get($versionKey);
+        if (!is_string($version) || $version === '') {
+            $version = $this->generateCacheVersion();
+            $this->cache->forever($versionKey, $version);
+        }
+        return $version;
+    }
+
+    protected function bumpCacheVersion(string $identifier): void
+    {
+        $versionKey = $this->cacheVersionKey($identifier);
+        $this->cache->forever($versionKey, $this->generateCacheVersion());
+    }
+
+    protected function generateCacheVersion(): string
+    {
+        $micro = sprintf('%.6F', microtime(true));
+        try {
+            $random = bin2hex(random_bytes(4));
+        } catch (\Exception $e) {
+            $random = dechex(mt_rand());
+        }
+        return $micro . ':' . $random;
     }
 
     protected function resolveContext(array $context): array
