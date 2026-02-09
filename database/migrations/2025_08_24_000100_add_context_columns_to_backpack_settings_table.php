@@ -13,8 +13,39 @@ return new class extends Migration {
 
     protected function indexExists(string $table, string $indexName): bool
     {
-        $result = DB::select('SHOW INDEX FROM `'.$table.'` WHERE Key_name = ?', [$indexName]);
-        return !empty($result);
+        $driver = DB::getDriverName();
+
+        if ($driver === 'pgsql') {
+            $schema = null;
+            $tableName = $table;
+
+            if (str_contains($table, '.')) {
+                [$schema, $tableName] = explode('.', $table, 2);
+            }
+
+            if ($schema === null) {
+                $schema = DB::getSchemaBuilder()->getCurrentSchemaName();
+            }
+
+            $result = DB::select(
+                'SELECT 1 FROM pg_indexes WHERE schemaname = ? AND tablename = ? AND indexname = ? LIMIT 1',
+                [$schema, $tableName, $indexName]
+            );
+
+            return !empty($result);
+        }
+
+        if ($driver === 'mysql') {
+            $result = DB::select('SHOW INDEX FROM `'.$table.'` WHERE Key_name = ?', [$indexName]);
+            return !empty($result);
+        }
+
+        $schemaBuilder = Schema::getConnection()->getSchemaBuilder();
+        if (method_exists($schemaBuilder, 'hasIndex')) {
+            return $schemaBuilder->hasIndex($table, $indexName);
+        }
+
+        return false;
     }
 
     public function up(): void
