@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Facade;
  * @method static array many(array $keys, array $context = [])
  * @method static void set(string $key, $value, array $meta = [])
  * @method static void forget(string $key, array $meta = [])
+ * @method static void invalidate(string $key)
  */
 class Settings extends Facade
 {

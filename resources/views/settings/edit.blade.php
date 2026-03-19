@@ -34,6 +34,12 @@
       @if (session('success'))
         <div class="alert alert-success">{{ session('success') }}</div>
       @endif
+      @if (session('error'))
+        <div class="alert alert-danger">{{ session('error') }}</div>
+      @endif
+      @if ($errors->has('settings_import_file'))
+        <div class="alert alert-danger">{{ $errors->first('settings_import_file') }}</div>
+      @endif
 
       <form method="POST" action="{{ $action }}">
         @csrf
@@ -82,6 +88,40 @@
                 </select>
               </div>
             @endif
+
+            <div class="mr-3 mb-2">
+              <a href="{{ $exportAction }}" class="btn btn-outline-secondary">
+                <i class="la la-download"></i> {{ __('Экспорт JSON') }}
+              </a>
+            </div>
+            <div class="mr-3 mb-2">
+              <button
+                type="button"
+                class="btn btn-outline-primary"
+                data-settings-import-trigger
+                data-target-input="settings-import-file"
+              >
+                <i class="la la-upload"></i> {{ __('Импорт JSON') }}
+              </button>
+            </div>
+          </div>
+        @else
+          <div class="d-flex align-items-end flex-wrap mb-3">
+            <div class="mr-3 mb-2">
+              <a href="{{ $exportAction }}" class="btn btn-outline-secondary">
+                <i class="la la-download"></i> {{ __('Экспорт JSON') }}
+              </a>
+            </div>
+            <div class="mr-3 mb-2">
+              <button
+                type="button"
+                class="btn btn-outline-primary"
+                data-settings-import-trigger
+                data-target-input="settings-import-file"
+              >
+                <i class="la la-upload"></i> {{ __('Импорт JSON') }}
+              </button>
+            </div>
           </div>
         @endif
 
@@ -124,6 +164,30 @@
           </button>
         </div>
       </form>
+
+      <form
+        id="settings-import-form"
+        method="POST"
+        action="{{ $importAction }}"
+        enctype="multipart/form-data"
+        class="d-none"
+      >
+        @csrf
+        @if ($hasTranslatable)
+          <input type="hidden" name="{{ $localeQueryParam }}" value="{{ $currentLocale ?? '' }}">
+        @endif
+        @if ($hasRegionable)
+          <input type="hidden" name="{{ $regionQueryParam }}" value="{{ $selectedRegionValue ?? '' }}">
+        @endif
+        <input
+          id="settings-import-file"
+          type="file"
+          name="settings_import_file"
+          accept=".json,application/json,text/json"
+          data-settings-import-input
+          data-target-form="settings-import-form"
+        >
+      </form>
     </div>
   </div>
 @endsection
@@ -139,6 +203,9 @@
     .settings-field-indicator {
       font-size: 0.9em;
       color: #6c757d;
+    }
+    .d-none {
+      display: none !important;
     }
   </style>
 @endpush
@@ -225,6 +292,39 @@
         runBpInit(document);
       }
 
+      function attachImportActions() {
+        var triggers = document.querySelectorAll('[data-settings-import-trigger]');
+        var inputs = document.querySelectorAll('[data-settings-import-input]');
+
+        triggers.forEach(function (trigger) {
+          trigger.addEventListener('click', function () {
+            var inputId = this.getAttribute('data-target-input');
+            if (!inputId) return;
+
+            var input = document.getElementById(inputId);
+            if (!input) return;
+
+            input.click();
+          });
+        });
+
+        inputs.forEach(function (input) {
+          input.addEventListener('change', function () {
+            if (!this.files || !this.files.length) {
+              return;
+            }
+
+            var formId = this.getAttribute('data-target-form');
+            if (!formId) return;
+
+            var form = document.getElementById(formId);
+            if (!form) return;
+
+            form.submit();
+          });
+        });
+      }
+
       function attachContextSwitcher() {
         var selects = document.querySelectorAll('[data-settings-context-select]');
         if (!selects.length) return;
@@ -285,9 +385,13 @@
       }
 
       if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', attachContextSwitcher);
+        document.addEventListener('DOMContentLoaded', function () {
+          attachContextSwitcher();
+          attachImportActions();
+        });
       } else {
         attachContextSwitcher();
+        attachImportActions();
       }
     })();
   </script>

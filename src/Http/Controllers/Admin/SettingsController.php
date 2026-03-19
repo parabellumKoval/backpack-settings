@@ -2,12 +2,19 @@
 
 namespace Backpack\Settings\Http\Controllers\Admin;
 
+use Backpack\Settings\Events\SettingsGroupChanged;
 use Illuminate\Routing\Controller;
 use Backpack\Settings\Facades\Settings;
-use Illuminate\Http\Request;
 use Backpack\Settings\Facades\SettingsRegistry;
-use Backpack\Settings\Events\SettingsGroupChanged;
+use Backpack\Settings\Models\Setting;
+use Backpack\Settings\Services\KeyResolver;
+use Backpack\Settings\Services\Registry\Page;
+use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 
 class SettingsController extends Controller
@@ -56,6 +63,8 @@ class SettingsController extends Controller
             'group' => $group,
             'pages' => $pages,
             'action' => route('backpack.settings.update', ['group' => $groupSlug]),
+            'exportAction' => route('backpack.settings.export', ['group' => $groupSlug]),
+            'importAction' => route('backpack.settings.import', ['group' => $groupSlug]),
             'currentLocale' => $context['locale'],
             'currentRegion' => $context['region'],
             'selectedRegionValue' => $context['region_selector_value'] ?? '',
@@ -93,6 +102,116 @@ class SettingsController extends Controller
         return redirect()->back()->with('success', 'Settings saved.');
     }
 
+    public function exportGroup(string $groupSlug)
+    {
+        $group = $this->resolveGroupOrFail($groupSlug);
+        $fieldMap = $this->groupFieldMap($group);
+        $fieldKeys = $this->groupDatabaseKeys($group);
+
+        $rows = collect();
+        if (!empty($fieldKeys)) {
+            $rows = Setting::query()
+                ->whereIn('key', $fieldKeys)
+                ->orderBy('key')
+                ->orderBy('region')
+                ->orderBy('locale')
+                ->get(['key', 'value', 'cast', 'region', 'locale'])
+                ->map(function (Setting $setting) {
+                    return [
+                        'key' => $this->normalizeRegisteredKey($setting->key),
+                        'value' => $setting->value,
+                        'cast' => $setting->cast,
+                        'region' => $setting->region,
+                        'locale' => $setting->locale,
+                    ];
+                })
+                ->unique(function (array $row) {
+                    return implode('|', [
+                        $row['key'],
+                        $row['region'] ?? '__null__',
+                        $row['locale'] ?? '__null__',
+                    ]);
+                })
+                ->values();
+        }
+
+        if ($rows->isEmpty()) {
+            return redirect()->back()->with('error', __('Для этого раздела в базе нет сохранённых настроек для экспорта.'));
+        }
+
+        $payload = [
+            'version' => 1,
+            'exported_at' => now()->toIso8601String(),
+            'group' => [
+                'slug' => $groupSlug,
+                'title' => $group->title,
+            ],
+            'items' => $rows->all(),
+        ];
+
+        $json = json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        abort_if($json === false, 500, 'Unable to export settings page.');
+
+        return response()->streamDownload(function () use ($json) {
+            echo $json;
+        }, $this->groupExportFilename($groupSlug, $group->title), [
+            'Content-Type' => 'application/json; charset=UTF-8',
+        ]);
+    }
+
+    public function importGroup(Request $request, string $groupSlug)
+    {
+        $group = $this->resolveGroupOrFail($groupSlug);
+
+        $validated = $request->validate([
+            'settings_import_file' => ['required', 'file', 'mimetypes:application/json,text/plain,text/json', 'max:10240'],
+        ]);
+
+        $payload = $this->parseImportFile($validated['settings_import_file']);
+        $fieldMap = $this->groupFieldMap($group);
+
+        if (($payload['group']['slug'] ?? $groupSlug) !== $groupSlug) {
+            throw ValidationException::withMessages([
+                'settings_import_file' => __('Этот файл относится к другой группе настроек.'),
+            ]);
+        }
+
+        $rows = $this->normalizeImportedItems($payload['items'] ?? [], $fieldMap, $groupSlug);
+        if (empty($rows)) {
+            throw ValidationException::withMessages([
+                'settings_import_file' => __('Файл импорта не содержит ни одной сохранённой настройки.'),
+            ]);
+        }
+
+        DB::transaction(function () use ($rows) {
+            foreach ($rows as $row) {
+                $query = DB::table(config('backpack-settings.table', 'ak_settings'))
+                    ->where('key', $row['key']);
+
+                $row['region'] === null
+                    ? $query->whereNull('region')
+                    : $query->where('region', $row['region']);
+
+                $row['locale'] === null
+                    ? $query->whereNull('locale')
+                    : $query->where('locale', $row['locale']);
+
+                $payload = Arr::only($row, ['value', 'cast', 'group', 'updated_at']);
+
+                if ($query->exists()) {
+                    $query->update($payload);
+                } else {
+                    DB::table(config('backpack-settings.table', 'ak_settings'))->insert($row);
+                }
+            }
+        });
+
+        $this->flushPageCache(array_keys($fieldMap));
+
+        return redirect($this->buildEditUrl($groupSlug, $request))
+            ->with('success', __('Настройки раздела импортированы.'));
+    }
+
     /**
      * Достаём группу или 404.
      */
@@ -125,6 +244,44 @@ class SettingsController extends Controller
             }
         }
         return $list;
+    }
+
+    protected function groupFieldMap(object $group): array
+    {
+        $map = [];
+
+        foreach ($group->pages as $page) {
+            if (!$page instanceof Page) {
+                continue;
+            }
+
+            foreach ($page->fields as $field) {
+                if (empty($field->key)) {
+                    continue;
+                }
+
+                $map[$field->key] = [
+                    'cast' => $field->cast ?? null,
+                ];
+            }
+        }
+
+        return $map;
+    }
+
+    protected function groupDatabaseKeys(object $group): array
+    {
+        $resolver = app(KeyResolver::class);
+        $keys = [];
+
+        foreach (array_keys($this->groupFieldMap($group)) as $key) {
+            $keys[] = $key;
+            foreach ($resolver->aliasesFor($key) as $alias) {
+                $keys[] = $alias;
+            }
+        }
+
+        return array_values(array_unique($keys));
     }
 
     /**
@@ -490,6 +647,135 @@ class SettingsController extends Controller
             return null;
         }
         return strtolower((string) $region);
+    }
+
+    protected function parseImportFile(UploadedFile $file): array
+    {
+        $contents = $file->get();
+        if (!is_string($contents) || trim($contents) === '') {
+            throw ValidationException::withMessages([
+                'settings_import_file' => __('Файл импорта пустой.'),
+            ]);
+        }
+
+        try {
+            $payload = json_decode($contents, true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException $exception) {
+            throw ValidationException::withMessages([
+                'settings_import_file' => __('Не удалось прочитать JSON-файл импорта.'),
+            ]);
+        }
+
+        if (!is_array($payload)) {
+            throw ValidationException::withMessages([
+                'settings_import_file' => __('Некорректная структура файла импорта.'),
+            ]);
+        }
+
+        return $payload;
+    }
+
+    protected function normalizeImportedItems($items, array $fieldMap, string $groupSlug): array
+    {
+        if (!is_array($items)) {
+            throw ValidationException::withMessages([
+                'settings_import_file' => __('Некорректная структура блока items в файле импорта.'),
+            ]);
+        }
+
+        $deduplicated = [];
+        $now = now();
+        $resolver = app(KeyResolver::class);
+
+        foreach ($items as $item) {
+            if (!is_array($item)) {
+                throw ValidationException::withMessages([
+                    'settings_import_file' => __('Каждая запись импорта должна быть объектом JSON.'),
+                ]);
+            }
+
+            $key = $item['key'] ?? null;
+            if (!is_string($key) || $key === '') {
+                throw ValidationException::withMessages([
+                    'settings_import_file' => __('В файле импорта есть запись без ключа настроек.'),
+                ]);
+            }
+
+            $normalizedKey = $resolver->normalize($key);
+
+            if (!array_key_exists($normalizedKey, $fieldMap)) {
+                throw ValidationException::withMessages([
+                    'settings_import_file' => __('Файл содержит ключ ":key", которого нет на этой странице.', ['key' => $key]),
+                ]);
+            }
+
+            $region = $this->normalizeRegion($item['region'] ?? null);
+            $locale = $this->normalizeLocale($item['locale'] ?? null);
+            $uniqueKey = implode('|', [$normalizedKey, $region ?? '__null__', $locale ?? '__null__']);
+            $value = array_key_exists('value', $item) ? $item['value'] : null;
+            if ($value !== null && !is_scalar($value)) {
+                $value = json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            }
+
+            $cast = array_key_exists('cast', $item) ? $item['cast'] : ($fieldMap[$normalizedKey]['cast'] ?? null);
+            if ($cast !== null) {
+                $cast = (string) $cast;
+            }
+
+            $deduplicated[$uniqueKey] = [
+                'key' => $normalizedKey,
+                'value' => $value === null ? null : (string) $value,
+                'cast' => $cast,
+                'group' => $groupSlug,
+                'region' => $region,
+                'locale' => $locale,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
+        }
+
+        return array_values($deduplicated);
+    }
+
+    protected function normalizeRegisteredKey(string $key): string
+    {
+        return app(KeyResolver::class)->normalize($key);
+    }
+
+    protected function flushPageCache(array $fieldKeys): void
+    {
+        $manager = app('backpack.settings');
+
+        foreach ($fieldKeys as $key) {
+            $manager->invalidate($key);
+        }
+    }
+
+    protected function buildEditUrl(string $groupSlug, Request $request): string
+    {
+        $query = Arr::where([
+            config('backpack-settings.locale_query_parameter', 'locale') => $request->input(config('backpack-settings.locale_query_parameter', 'locale')),
+            config('backpack-settings.region_query_parameter', 'country') => $request->input(config('backpack-settings.region_query_parameter', 'country')),
+        ], function ($value) {
+            return $value !== null && $value !== '';
+        });
+
+        return route('backpack.settings.edit', ['group' => $groupSlug] + $query);
+    }
+
+    protected function groupExportFilename(string $groupSlug, string $groupTitle): string
+    {
+        $groupTitleSlug = Str::slug($groupTitle);
+        if ($groupTitleSlug === '') {
+            $groupTitleSlug = 'settings';
+        }
+
+        return sprintf(
+            '%s-%s-%s.json',
+            Str::slug($groupSlug) ?: 'settings',
+            $groupTitleSlug,
+            now()->format('Ymd_His')
+        );
     }
 
     /**

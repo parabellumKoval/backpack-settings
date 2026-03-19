@@ -188,6 +188,23 @@ class SettingsManager
         }
     }
 
+    public function invalidate(string $key): void
+    {
+        $canon = $this->resolver->normalize($key);
+
+        $this->forgetCacheKeys($canon);
+        if ($canon !== $key) {
+            $this->forgetCacheKeys($key);
+        }
+
+        $parts = explode('.', $canon);
+        $prefix = '';
+        foreach ($parts as $part) {
+            $prefix = $prefix ? ($prefix.'.'.$part) : $part;
+            $this->forgetCacheKeys($prefix);
+        }
+    }
+
     protected function prioritizedDrivers(): array
     {
         $ordered = [];

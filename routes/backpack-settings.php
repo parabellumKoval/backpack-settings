@@ -9,4 +9,6 @@ Route::group([
 ], function () {
     Route::get('{group}', [SettingsController::class, 'edit'])->name('backpack.settings.edit');
     Route::post('{group}', [SettingsController::class, 'update'])->name('backpack.settings.update');
+    Route::get('{group}/export', [SettingsController::class, 'exportGroup'])->name('backpack.settings.export');
+    Route::post('{group}/import', [SettingsController::class, 'importGroup'])->name('backpack.settings.import');
 });
