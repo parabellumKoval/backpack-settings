@@ -15,6 +15,7 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use ParabellumKoval\Webhooks\Services\WebhookDispatcher;
 
 
 class SettingsController extends Controller
@@ -207,6 +208,7 @@ class SettingsController extends Controller
         });
 
         $this->flushPageCache(array_keys($fieldMap));
+        $this->refreshFrontendSettingsCache();
 
         return redirect($this->buildEditUrl($groupSlug, $request))
             ->with('success', __('Настройки раздела импортированы.'));
@@ -749,6 +751,11 @@ class SettingsController extends Controller
         foreach ($fieldKeys as $key) {
             $manager->invalidate($key);
         }
+    }
+
+    protected function refreshFrontendSettingsCache(): void
+    {
+        app(WebhookDispatcher::class)->dispatch('refresh_settings', 'settings');
     }
 
     protected function buildEditUrl(string $groupSlug, Request $request): string
