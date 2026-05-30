@@ -2,6 +2,7 @@
 
 namespace Backpack\Settings\Http\Controllers\Api;
 
+use Backpack\Store\app\Support\CheckoutMethodCatalog;
 use Illuminate\Routing\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -48,7 +49,10 @@ class SettingsApiController extends Controller
         
         $data = [];
         foreach ($keys as $key) {
-            $data[$key] = Settings::get($key, null, $context);
+            $data[$key] = $this->normalizeSettingValue(
+                $key,
+                Settings::get($key, null, $context)
+            );
         }
 
         return response()->json([
@@ -80,7 +84,10 @@ class SettingsApiController extends Controller
 
         foreach ($keys as $key) {
             $segments = explode('.', $key);
-            $value = Settings::get($key, null, $context);
+            $value = $this->normalizeSettingValue(
+                $key,
+                Settings::get($key, null, $context)
+            );
             $this->arraySet($result, $segments, $value);
         }
 
@@ -133,6 +140,19 @@ class SettingsApiController extends Controller
         }
 
         return $context;
+    }
+
+    protected function normalizeSettingValue(string $key, mixed $value): mixed
+    {
+        if (!is_array($value) && !is_string($value)) {
+            return $value;
+        }
+
+        if (!preg_match('/^payment(?:\.[a-z0-9_]+)?\.methods$/', $key)) {
+            return $value;
+        }
+
+        return CheckoutMethodCatalog::filterPaymentMethodKeys($value);
     }
 
     protected function normalizeLocale($locale): ?string
